@@ -26,11 +26,11 @@ BOT_TOKEN = '8463982454:AAFXhclFtn5cCoJLZl3l-SwhPMk3ssv6J8o'
 API_ID = 22657083
 API_HASH = 'd6186691704bd901bdab275ceaab88f3'
 
-MONGO_URI = "mongodb+srv://adimyze:YOUR_PASSWORD@cluster0.xxxxx.mongodb.net/adimyze?retryWrites=true&w=majority"
-CHANNEL_LINK = "https://t.me/adimyzepro"
+MONGO_URI = "mongodb+srv://StarGiftBot_db_user:gld1RLm4eYbCWZlC@cluster0.erob6sp.mongodb.net/?appName=Cluster0"
+CHANNEL_LINK = "https://t.me/testttxs"
 
-WELCOME_IMG = "https://i.ibb.co/7vZ3q5n/welcome.jpg"  # Ya remove
-DASHBOARD_IMG = "https://i.ibb.co/KpY8QbX/dashboard.jpg"  # Ya remove
+WELCOME_IMG = "https://telegram.me/share/url?url=https://files.catbox.moe/zttfbe.jpg"  # Ya remove
+DASHBOARD_IMG = "https://telegram.me/share/url?url=https://files.catbox.moe/zttfbe.jpg"  # Ya remove
 
 # MongoDB
 client_mongo = AsyncIOMotorClient(MONGO_URI)
