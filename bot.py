@@ -1,25 +1,31 @@
-# bot.py
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler
-from handlers.start_handler import start_handler
-from handlers.dashboard_handler import dashboard_handler
-from handlers.account_handler import account_handler
-from handlers.ad_handler import ad_handler
-from handlers.utility_handler import utility_handler
-from handlers.support_update import support_handler, update_handler
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters
+import logging
+from config import BOT_TOKEN
+from handlers import start, agree, phone_number_input, handle_otp_input, otp_input, cancel_process, button_click
 
-# Set up the Updater and Dispatcher
-updater = Updater("YOUR_BOT_API_TOKEN", use_context=True)
+# Set up logging
+logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
+
+# Telegram Bot Token
+bot = Bot(token=BOT_TOKEN)
+
+# Set up the bot with handlers
+updater = Updater(token=BOT_TOKEN, use_context=True)
 dp = updater.dispatcher
 
-# Register Handlers
-dp.add_handler(start_handler)          # /start command
-dp.add_handler(dashboard_handler)      # Dashboard button actions
-dp.add_handler(account_handler)        # Account-related actions
-dp.add_handler(ad_handler)             # Ad-related actions (setting, starting, stopping)
-dp.add_handler(utility_handler)        # Utility actions (setting time interval, viewing logs)
-dp.add_handler(support_handler)        # Support button
-dp.add_handler(update_handler)         # Update button
+# Command Handlers
+dp.add_handler(CommandHandler("start", start))
+dp.add_handler(CommandHandler("agree", agree))
+
+# Handle phone number and OTP input
+dp.add_handler(MessageHandler(Filters.regex(r'^\+?[1-9]\d{1,14}$'), phone_number_input))  # Regex to match phone numbers
+dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_otp_input))  # Handle OTP input
+
+# Handle the callback from the inline keyboard button
+dp.add_handler(CallbackQueryHandler(otp_input, pattern='^otp_request$'))
+dp.add_handler(CallbackQueryHandler(cancel_process, pattern='^cancel_request$'))  # Cancel process
+dp.add_handler(CallbackQueryHandler(button_click))
 
 # Start the bot
 updater.start_polling()
-updater.idle()
