@@ -26,8 +26,8 @@ CHANNEL_URL = "https://t.me/adimyzepro"  # MUST JOIN CHANNEL
 CHANNEL_ID = -1001234567890  # GET FROM @username_to_id_bot or browser inspect
 
 # Images - Optional
-DASHBOARD_IMAGE = "https://telegra.ph/file/abc123.jpg"  # Or remove
-WELCOME_IMAGE = "https://telegra.ph/file/xyz789.jpg"   # Or remove
+DASHBOARD_IMAGE = "https://telegram.me/share/url?url=https://files.catbox.moe/zttfbe.jpg"  # Or remove
+WELCOME_IMAGE = "https://telegram.me/share/url?url=https://files.catbox.moe/zttfbe.jpg"   # Or remove
 
 # MongoDB Setup
 mongo_client = AsyncIOMotorClient(MONGO_URI)
