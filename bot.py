@@ -58,7 +58,7 @@ import json
 # ────────────────────────────────────────────────
 # CONFIGURATION & CONSTANTS
 # ────────────────────────────────────────────────
-BOT_TOKEN = '8463982454:AAFXhclFtn5cCoJLZl3l-SwhPMk3ssv6J8o'
+BOT_TOKEN = '8463982454:AAErd8EZswKgQ1BNF_r-N8iUH8HQcb293lQ'
 API_ID = 22657083
 API_HASH = 'd6186691704bd901bdab275ceaab88f3'
 MONGO_URI = "mongodb+srv://bot627668:2bEJ56yJSu7vzLws@cluster0.qbw5van.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
