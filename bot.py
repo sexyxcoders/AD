@@ -131,7 +131,7 @@ def kb_accounts(accounts: List[Dict]) -> InlineKeyboardMarkup:
         phone = acc.get("phone", "Unknown")[-8:]
         acc_id = str(acc["_id"])
         buttons.append([InlineKeyboardButton(f"{status} +{phone}", callback_data=f"acc_{acc_id}")])
-    
+
     buttons.extend([
         [],
         [InlineKeyboardButton("➕ Add New Account", callback_data="add_account")],
@@ -222,7 +222,7 @@ async def cb_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "my_accounts": show_my_accounts,
             "load_chats": load_all_chats,
             "set_ad": start_set_ad,
-            "set_delays": show_delays,  # Now implemented
+            "set_delays": show_delays,
             "status": show_status,
             "start_ads": start_campaign,
             "stop_ads": stop_campaign,
@@ -267,17 +267,17 @@ async def handle_phone_message(uid: int, phone: str, message):
         return
 
     client = TelegramClient(StringSession(), API_ID, API_HASH)
-    
+
     try:
         await client.connect()
-        
+
         if await client.is_user_authorized():
             await message.reply_text("✅ This session is already authorized.")
             await client.disconnect()
             return
 
         sent_code = await client.send_code_request(phone)
-        
+
         user_states[uid] = {
             "step": "otp",
             "phone": phone,
@@ -385,6 +385,7 @@ async def verify_login(uid: int, query, step: str):
 
 async def finalize_account_setup(uid: int, query, client: TelegramClient):
     """Complete account setup and save to database"""
+    uname = None
     try:
         # Update profile
         await client(UpdateProfileRequest(
@@ -394,13 +395,14 @@ async def finalize_account_setup(uid: int, query, client: TelegramClient):
 
         # Try to set username
         for attempt in range(5):
-            uname = f"{USERNAME_PREFIX}{random.randint(1000, 9999)}"
+            test_uname = f"{USERNAME_PREFIX}{random.randint(1000, 9999)}"
             try:
-                await client(UpdateUsernameRequest(username=uname))
+                await client(UpdateUsernameRequest(username=test_uname))
+                uname = test_uname
                 break
             except UsernameOccupiedError:
                 if attempt == 4:
-                    logger.warning(f"Could not set username for {state['phone']}")
+                    logger.warning(f"Could not set username")
 
         # Save session
         session_str = client.session.save()
@@ -413,7 +415,7 @@ async def finalize_account_setup(uid: int, query, client: TelegramClient):
             "session": session_str,
             "active": True,
             "created": datetime.now(timezone.utc),
-            "username": uname if attempt < 4 else None
+            "username": uname
         }
         await db.accounts.insert_one(doc)
 
@@ -507,7 +509,7 @@ async def show_my_accounts(query, uid: int, _):
             [InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]
         ]), parse_mode=ParseMode.HTML)
         return
-    
+
     text = f"👥 <b>My Accounts ({len(accs)})</b>"
     await query.edit_message_text(text, reply_markup=kb_accounts(accs), parse_mode=ParseMode.HTML)
 
@@ -517,10 +519,10 @@ async def handle_account_action(query, uid: int, acc_id: str):
     if not acc:
         await query.answer("Account not found!", show_alert=True)
         return
-    
+
     status = "🟢 Active" if acc.get("active", True) else "🔴 Inactive"
     phone = acc.get("phone", "Unknown")[-8:]
-    
+
     text = f"""
 📱 <b>Account Details</b>
 
@@ -531,13 +533,13 @@ Created: {acc.get('created', datetime.now()).strftime('%Y-%m-%d')}
 
 Used in: {len([c for c in (await db.users.find_one({"user_id": uid}) or {}).get('chats', []) if c.get('account_id') == acc_id])} chats
     """
-    
+
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔴 Toggle Status", callback_data=f"toggle_{acc_id}")],
         [InlineKeyboardButton("🗑️ Delete Account", callback_data=f"confirm_del_{acc_id}")],
         [InlineKeyboardButton("🔙 Back", callback_data="my_accounts")]
     ])
-    
+
     await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.HTML)
 
 async def handle_delete_account(query, uid: int, acc_id: str):
@@ -546,10 +548,10 @@ async def handle_delete_account(query, uid: int, acc_id: str):
     if not acc:
         await query.answer("Account not found!", show_alert=True)
         return
-    
+
     phone = acc.get("phone", "Unknown")[-8:]
     text = f"🗑️ <b>Delete Account?</b>\n\nPhone ending: <code>{phone}</code>\n\nThis action cannot be undone!"
-    
+
     await query.edit_message_text(text, reply_markup=kb_confirm_delete(acc_id), parse_mode=ParseMode.HTML)
 
 # ────────────────────────────────────────────────
@@ -570,7 +572,7 @@ async def load_all_chats(query, uid: int, _):
         try:
             client = TelegramClient(StringSession(acc["session"]), API_ID, API_HASH)
             await client.connect()
-            
+
             if not await client.is_user_authorized():
                 await client.disconnect()
                 continue
@@ -602,7 +604,7 @@ async def load_all_chats(query, uid: int, _):
 
     user_doc = await db.users.find_one({"user_id": uid}) or {}
     final_count = len(user_doc.get("chats", []))
-    
+
     await query.edit_message_text(
         f"✅ <b>Chats Loaded Successfully!</b>\n\n"
         f"📊 Total unique chats: <b>{final_count}</b>",
@@ -672,7 +674,7 @@ async def handle_ad_forward(uid: int, message):
         reply_markup=kb_dashboard(),
         parse_mode=ParseMode.HTML
     )
-    
+
     user_states.pop(uid, None)
     return True
 
@@ -682,11 +684,11 @@ async def start_campaign(query, uid: int, context):
     if not user:
         await query.answer("Please setup first!", show_alert=True)
         return
-        
+
     if not user.get("ad_message"):
         await query.answer("Set ad message first!", show_alert=True)
         return
-        
+
     if not user.get("chats"):
         await query.answer("Load chats first!", show_alert=True)
         return
@@ -717,7 +719,7 @@ async def stop_campaign(query, uid: int, _):
         del ad_tasks[uid]
 
     await db.users.update_one({"user_id": uid}, {"$set": {"running": False}})
-    
+
     await query.edit_message_text(
         "⛔ <b>Campaign Stopped</b>\n\n"
         "All tasks cancelled successfully.",
@@ -728,7 +730,7 @@ async def stop_campaign(query, uid: int, _):
 async def run_campaign(uid: int):
     """Main campaign loop"""
     logger.info(f"Campaign started for user {uid}")
-    
+
     try:
         while True:
             user_doc = await db.users.find_one({"user_id": uid})
@@ -737,13 +739,13 @@ async def run_campaign(uid: int):
 
             ad = user_doc.get("ad_message")
             chats = user_doc.get("chats", [])
-            
+
             if not ad or not chats:
                 await asyncio.sleep(30)
                 continue
 
             cycle_stats = {"sent": 0, "failed": 0, "timestamp": datetime.now(timezone.utc)}
-            
+
             # Process chats in batches
             for i, chat in enumerate(chats[:100]):  # Limit per cycle
                 if not (await db.users.find_one({"user_id": uid}) or {}).get("running"):
@@ -760,7 +762,7 @@ async def run_campaign(uid: int):
 
                     client = TelegramClient(StringSession(acc["session"]), API_ID, API_HASH)
                     await client.connect()
-                    
+
                     if not await client.is_user_authorized():
                         await client.disconnect()
                         cycle_stats["failed"] += 1
@@ -774,12 +776,12 @@ async def run_campaign(uid: int):
                         drop_author=True,
                         silent=True
                     )
-                    
+
                     cycle_stats["sent"] += 1
                     logger.info(f"Sent ad to {chat['title']} using {acc['phone'][-8:]}")
-                    
+
                     await client.disconnect()
-                    
+
                     # Smart delay
                     delay = random.uniform(60, 180)  # 1-3 minutes
                     await asyncio.sleep(delay)
@@ -821,10 +823,10 @@ async def show_status(query, uid: int, _):
     """Show campaign status"""
     user_doc = await db.users.find_one({"user_id": uid}) or {}
     acc_count = await db.accounts.count_documents({"user_id": uid, "active": True})
-    
+
     stats = user_doc.get("stats", [])
     recent_stats = stats[-5:] if stats else []
-    
+
     logs_text = ""
     total_sent = total_failed = 0
     for stat in recent_stats:
@@ -834,7 +836,7 @@ async def show_status(query, uid: int, _):
         logs_text += f"• {ts}: ✅{sent} ❌{failed}\n"
         total_sent += sent
         total_failed += failed
-    
+
     if not logs_text:
         logs_text = "No activity yet"
 
@@ -851,7 +853,7 @@ async def show_status(query, uid: int, _):
 
 💯 Total: ✅{total_sent} ❌{total_failed}
     """
-    
+
     await query.edit_message_text(text, reply_markup=kb_dashboard(), parse_mode=ParseMode.HTML)
 
 async def show_delays(query, uid: int, _):
@@ -903,7 +905,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     """Main application entry point"""
     print("🚀 ADIMYZE PRO v12 starting...")
-    
+
     # Test database connection
     try:
         await db.command('ping')
@@ -914,11 +916,11 @@ async def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Handlers
+    # Handlers - FIXED LINE HERE
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CallbackQueryHandler(cb_handler))
     app.add_handler(MessageHandler(
-        filters.TEXT | filters.FORWARDED,
+        (filters.TEXT | filters.FORWARDED) & ~filters.COMMAND,
         message_handler
     ))
 
@@ -935,24 +937,24 @@ async def main():
             await asyncio.sleep(3600)
     except KeyboardInterrupt:
         print("\n🛑 Shutting down...")
-        
+
         # Cancel all campaigns
         for task in list(ad_tasks.values()):
             if not task.done():
                 task.cancel()
-        
+
         # Cleanup
         await app.updater.stop()
         await app.stop()
         await app.shutdown()
-        
+
         # Close clients
         for client in clients_cache.values():
             try:
                 await client.disconnect()
             except:
                 pass
-                
+
         mongo_client.close()
         print("✅ Shutdown complete!")
 
