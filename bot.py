@@ -1,3 +1,4 @@
+# Complete FIXED imports (lines 17-40):
 import asyncio
 import random
 import logging
@@ -31,7 +32,7 @@ from telethon.errors import (
     UsernameOccupiedError,
     ChatWriteForbiddenError,
     PeerFloodError,
-    SessionPasswordInvalidError,
+    PasswordHashInvalidError,  # ✅ FIXED
     PhoneNumberInvalidError,
     AuthKeyUnregisteredError,
 )
