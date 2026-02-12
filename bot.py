@@ -1,8 +1,10 @@
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler
+from telegram.ext.filters import Filters  # Correct import for Filters
 import logging
-from config import BOT_TOKEN
-from handlers import start, agree, phone_number_input, handle_otp_input, otp_input, cancel_process, button_click
+from login_manager import generate_otp, verify_otp
+from datetime import datetime
+import random
 
 # Set up logging
 logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
