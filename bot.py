@@ -17,9 +17,9 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # Bot Configuration
-BOT_TOKEN = 'YOUR_BOT_TOKEN_HERE'  # Replace with your bot token
-API_ID = 12345  # Get from my.telegram.org
-API_HASH = 'your_api_hash_here'   # Get from my.telegram.org
+BOT_TOKEN = '8463982454:AAFXhclFtn5cCoJLZl3l-SwhPMk3ssv6J8o'  # Replace with your bot token
+API_ID = 22657083  # Get from my.telegram.org
+API_HASH = 'd6186691704bd901bdab275ceaab88f3'   # Get from my.telegram.org
 
 # Data storage
 user_sessions = {}
