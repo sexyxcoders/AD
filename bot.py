@@ -64,7 +64,7 @@ PROFILE_NAME = "Adimyze Pro"
 PROFILE_BIO = "🚀 Professional Telegram Marketing Automation | Managed by @nexaxoders"
 
 # Sudo configuration
-SUDO_USERS = [5591305970]  # Add your user ID here as the owner
+SUDO_USERS = [2083251445]  # Add your user ID here as the owner
 PREMIUM_USERS = []  # Will be populated from DB
 
 # Logging configuration
