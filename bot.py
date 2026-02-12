@@ -1,11 +1,22 @@
-# Complete FIXED imports (lines 17-40):
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+ADIMYZE PRO v12 — Telegram Bulk Forwarding & Marketing Automation
+Rewritten from scratch with modern UI, single‑instance lock, and robust flow.
+Author: @nexaxoders
+"""
+
 import asyncio
 import random
 import logging
 import re
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+import sys
 import os
+import fcntl
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Any, Optional, List
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -22,8 +33,7 @@ from telegram.error import BadRequest
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
-from telethon.tl.functions.messages import GetDialogsRequest
-from telethon.tl.types import InputPeerChannel, Dialog
+from telethon.tl.types import InputPeerChannel
 from telethon.errors import (
     SessionPasswordNeededError,
     PhoneCodeInvalidError,
@@ -41,7 +51,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 
 # ────────────────────────────────────────────────
-# CONFIG
+# CONFIG & CONSTANTS
 # ────────────────────────────────────────────────
 BOT_TOKEN = '8463982454:AAFXhclFtn5cCoJLZl3l-SwhPMk3ssv6J8o'
 API_ID = 22657083
@@ -50,12 +60,11 @@ MONGO_URI = "mongodb+srv://StarGiftBot_db_user:gld1RLm4eYbCWZlC@cluster0.erob6sp
 DB_NAME = "adimyze"
 CHANNEL_LINK = "https://t.me/testttxs"
 
-# Profile template
 PROFILE_NAME = "Nexa"
 PROFILE_BIO = "🔥 Managed by @nexaxoders | Adimyze Pro v12 🚀"
 USERNAME_PREFIX = "nexa_by_"
 
-# Logging setup
+# Logging
 logging.basicConfig(
     format='%(asctime)s | %(levelname)s | %(message)s',
     level=logging.INFO,
@@ -63,17 +72,44 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Database connection
+# Database
 mongo_client = AsyncIOMotorClient(MONGO_URI)
 db = mongo_client[DB_NAME]
 
-# Global state management
+# Global state
 user_states: Dict[int, Dict[str, Any]] = {}
 ad_tasks: Dict[int, asyncio.Task] = {}
 clients_cache: Dict[str, TelegramClient] = {}
 
+# Lockfile for single instance
+PID_FILE = Path(__file__).with_suffix(".pid")
+
 # ────────────────────────────────────────────────
-# KEYBOARDS
+# LOCKFILE UTILS
+# ────────────────────────────────────────────────
+def acquire_lock():
+    """Ensure only one instance runs."""
+    try:
+        pid_file = open(PID_FILE, "w")
+        fcntl.flock(pid_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        pid_file.write(str(os.getpid()))
+        pid_file.flush()
+        return pid_file
+    except (IOError, BlockingIOError):
+        logger.error("Another instance is already running. Exiting.")
+        sys.exit(1)
+
+def release_lock(pid_file):
+    """Release lock and remove PID file."""
+    try:
+        fcntl.flock(pid_file, fcntl.LOCK_UN)
+        pid_file.close()
+        PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+# ────────────────────────────────────────────────
+# KEYBOARD BUILDERS (Aesthetic & Consistent)
 # ────────────────────────────────────────────────
 def kb_welcome() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -133,44 +169,47 @@ def kb_confirm_delete(acc_id: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("❌ Cancel", callback_data="my_accounts")],
     ])
 
+def kb_back(target: str = "dashboard") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=target)]])
+
 # ────────────────────────────────────────────────
-# CORE HANDLERS
+# COMMAND HANDLERS
 # ────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command"""
+    """Handle /start"""
     text = """
 ✨ <b>ADIMYZE PRO v12</b> ✨
 <b>Telegram Bulk Forwarding & Marketing Tool</b>
-🔥 <b>Main Features:</b>
-• ✅ Multiple accounts support
-• ✅ Smart anti-flood delays
+🔥 <b>Features:</b>
+• ✅ Multi‑account management
+• ✅ Smart anti‑flood delays
 • ✅ Forward text/media/files
 • ✅ Auto profile setup
 • ✅ MongoDB persistence
-• ✅ Real-time statistics
-👨‍💻 Developed by @nexaxoders
-• 2026
+• ✅ Real‑time statistics
+👨‍💻 Developed by @nexaxoders • 2026
 """
     await update.message.reply_text(text, reply_markup=kb_welcome(), parse_mode=ParseMode.HTML)
 
+# ────────────────────────────────────────────────
+# CALLBACK HANDLERS (ROUTER)
+# ────────────────────────────────────────────────
 async def cb_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Main callback query handler"""
+    """Main callback router"""
     query = update.callback_query
     await query.answer()
     uid = query.from_user.id
     data = query.data
     try:
-        # Home navigation
+        # Home
         if data == "home":
             await query.edit_message_text("🏠 Main Menu", reply_markup=kb_welcome())
             return
-
         # Cancel login
         if data == "cancel_login":
             cleanup_user_state(uid)
             await query.edit_message_text("❌ Login cancelled.", reply_markup=kb_dashboard())
             return
-
         # Static pages
         if data == "support":
             await show_support(query)
@@ -178,13 +217,11 @@ async def cb_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if data == "about":
             await show_about(query)
             return
-
-        # OTP handling
+        # OTP/2FA flow
         state = user_states.get(uid)
         if state and state.get("step") in ("otp", "2fa"):
             await handle_otp_callback(uid, data, query)
             return
-
         # Account actions
         if data.startswith("acc_"):
             acc_id = data[4:]
@@ -194,8 +231,7 @@ async def cb_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             acc_id = data[8:]
             await handle_delete_account(query, uid, acc_id)
             return
-
-        # Dashboard handlers
+        # Dashboard routing
         handlers = {
             "dashboard": show_dashboard,
             "add_account": start_add_account,
@@ -221,28 +257,25 @@ async def cb_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ACCOUNT MANAGEMENT
 # ────────────────────────────────────────────────
 async def start_add_account(query, uid: int, context):
-    """Start account addition process"""
+    """Initiate account addition"""
     user_states[uid] = {"step": "phone"}
     await query.edit_message_text(
         "📱 <b>Add New Account</b>\n\n"
-        "Send phone number in <b>international format</b>:\n\n"
+        "Send phone number in <b>international format</b>:\n"
         "<code>+12025550123</code>\n<code>+919876543210</code>",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="dashboard")]]),
+        reply_markup=kb_back(),
         parse_mode=ParseMode.HTML
     )
 
 async def handle_phone_message(uid: int, phone: str, message):
-    """Handle phone number input"""
+    """Validate phone and request OTP"""
     if not re.match(r'^\+[1-9]\d{10,14}$', phone):
         await message.reply_text(
-            "❌ Invalid format!\n\n"
-            "Use international format:\n"
-            "<code>+12025550123</code>",
+            "❌ Invalid format!\n\nUse international format:\n<code>+12025550123</code>",
             parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="dashboard")]])
+            reply_markup=kb_back()
         )
         return
-
     client = TelegramClient(StringSession(), API_ID, API_HASH)
     try:
         await client.connect()
@@ -250,7 +283,6 @@ async def handle_phone_message(uid: int, phone: str, message):
             await message.reply_text("✅ This session is already authorized.")
             await client.disconnect()
             return
-
         sent_code = await client.send_code_request(phone)
         user_states[uid] = {
             "step": "otp",
@@ -258,11 +290,9 @@ async def handle_phone_message(uid: int, phone: str, message):
             "hash": sent_code.phone_code_hash,
             "buffer": "",
             "client": client,
-            "phone_code": sent_code.phone_code if hasattr(sent_code, 'phone_code') else None
         }
         await message.reply_text(
-            f"✅ Code sent to <b>{phone}</b>\n\n"
-            f"Enter 5-digit code below:",
+            f"✅ Code sent to <b>{phone}</b>\n\nEnter 5‑digit code below:",
             reply_markup=kb_otp("", False, phone),
             parse_mode=ParseMode.HTML
         )
@@ -278,26 +308,22 @@ async def handle_phone_message(uid: int, phone: str, message):
         await client.disconnect()
 
 async def handle_otp_callback(uid: int, data: str, query):
-    """Handle OTP button presses"""
+    """OTP/2FA keypad logic"""
     state = user_states.get(uid)
     if not state:
         return
-
     step = state["step"]
     buffer = state["buffer"]
-
     if data == "otp_confirm":
         await verify_login(uid, query, step)
         return
-
     if data == "otp_back":
         state["buffer"] = buffer[:-1]
     elif data.startswith("otp_") and data[4:].isdigit():
         max_len = 5 if step == "otp" else 32
         if len(buffer) < max_len:
             state["buffer"] += data[4:]
-
-    # Update display
+    # Update UI
     is_2fa = step == "2fa"
     phone = state.get("phone", "")
     await query.edit_message_text(
@@ -308,18 +334,14 @@ async def handle_otp_callback(uid: int, data: str, query):
     )
 
 async def verify_login(uid: int, query, step: str):
-    """Verify OTP or 2FA password"""
+    """Submit OTP or 2FA and finalize login"""
     state = user_states[uid]
     code = state["buffer"]
-    client: TelegramClient = state["client"]
+    client = state["client"]
     try:
         if step == "otp":
-            await client.sign_in(
-                phone=state["phone"],
-                code=code,
-                phone_code_hash=state["hash"]
-            )
-        else:  # 2fa
+            await client.sign_in(phone=state["phone"], code=code, phone_code_hash=state["hash"])
+        else:
             await client.sign_in(password=code)
         await finalize_account_setup(uid, query, client)
     except SessionPasswordNeededError:
@@ -352,15 +374,10 @@ async def verify_login(uid: int, query, step: str):
         cleanup_user_state(uid)
 
 async def finalize_account_setup(uid: int, query, client: TelegramClient):
-    """Complete account setup and save to database"""
+    """Save account and set profile"""
     uname = None
     try:
-        # Update profile
-        await client(UpdateProfileRequest(
-            first_name=PROFILE_NAME,
-            about=PROFILE_BIO
-        ))
-        # Try to set username
+        await client(UpdateProfileRequest(first_name=PROFILE_NAME, about=PROFILE_BIO))
         for attempt in range(5):
             test_uname = f"{USERNAME_PREFIX}{random.randint(1000, 9999)}"
             try:
@@ -368,13 +385,8 @@ async def finalize_account_setup(uid: int, query, client: TelegramClient):
                 uname = test_uname
                 break
             except UsernameOccupiedError:
-                if attempt == 4:
-                    logger.warning(f"Could not set username")
-
-        # Save session
+                continue
         session_str = client.session.save()
-
-        # Save to database
         doc = {
             "_id": f"acc_{random.randint(100000, 999999)}_{uid}",
             "user_id": uid,
@@ -382,7 +394,7 @@ async def finalize_account_setup(uid: int, query, client: TelegramClient):
             "session": session_str,
             "active": True,
             "created": datetime.now(timezone.utc),
-            "username": uname
+            "username": uname,
         }
         await db.accounts.insert_one(doc)
         await query.edit_message_text(
@@ -405,19 +417,18 @@ async def finalize_account_setup(uid: int, query, client: TelegramClient):
         await client.disconnect()
 
 def cleanup_user_state(uid: int):
-    """Clean up user login state"""
+    """Wipe temporary login state and disconnect client"""
     state = user_states.pop(uid, None)
     if state and "client" in state:
         try:
             asyncio.create_task(state["client"].disconnect())
-        except:
+        except Exception:
             pass
 
 # ────────────────────────────────────────────────
 # UI PAGES
 # ────────────────────────────────────────────────
 async def show_support(query):
-    """Show support page"""
     await query.edit_message_text(
         "📞 <b>Support & Contact</b>\n\n"
         "👨‍💻 Developer: @nexaxoders\n"
@@ -432,7 +443,6 @@ async def show_support(query):
     )
 
 async def show_about(query):
-    """Show about page"""
     await query.edit_message_text(
         "ℹ️ <b>About ADIMYZE PRO v12</b>\n\n"
         "🤖 Professional Telegram marketing automation\n\n"
@@ -441,12 +451,11 @@ async def show_about(query):
         "• Don't spam\n"
         "• Rate limits respected\n\n"
         "👨‍💻 Made with ❤️ by @nexaxoders",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Home", callback_data="home")]]),
+        reply_markup=kb_back("home"),
         parse_mode=ParseMode.HTML
     )
 
 async def show_dashboard(query, uid: int, _):
-    """Show main dashboard"""
     acc_count = await db.accounts.count_documents({"user_id": uid, "active": True})
     user_doc = await db.users.find_one({"user_id": uid}) or {}
     chat_count = len(user_doc.get("chats", []))
@@ -462,20 +471,24 @@ async def show_dashboard(query, uid: int, _):
     await query.edit_message_text(text, reply_markup=kb_dashboard(), parse_mode=ParseMode.HTML)
 
 async def show_my_accounts(query, uid: int, _):
-    """Show user accounts"""
     accs = await db.accounts.find({"user_id": uid}).sort("created", -1).to_list(20)
     if not accs:
-        text = "👥 <b>No accounts yet</b>\n\nAdd your first account to get started!"
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Add Account", callback_data="add_account")],
-            [InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]
-        ]), parse_mode=ParseMode.HTML)
+        await query.edit_message_text(
+            "👥 <b>No accounts yet</b>\n\nAdd your first account to get started!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("➕ Add Account", callback_data="add_account")],
+                [InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]
+            ]),
+            parse_mode=ParseMode.HTML
+        )
         return
-    text = f"👥 <b>My Accounts ({len(accs)})</b>"
-    await query.edit_message_text(text, reply_markup=kb_accounts(accs), parse_mode=ParseMode.HTML)
+    await query.edit_message_text(
+        f"👥 <b>My Accounts ({len(accs)})</b>",
+        reply_markup=kb_accounts(accs),
+        parse_mode=ParseMode.HTML
+    )
 
 async def handle_account_action(query, uid: int, acc_id: str):
-    """Handle individual account actions"""
     acc = await db.accounts.find_one({"_id": acc_id, "user_id": uid})
     if not acc:
         await query.answer("Account not found!", show_alert=True)
@@ -488,7 +501,6 @@ Phone: <code>+{phone}</code>
 Status: <b>{status}</b>
 ID: <code>{acc_id}</code>
 Created: {acc.get('created', datetime.now()).strftime('%Y-%m-%d')}
-Used in: {len([c for c in (await db.users.find_one({"user_id": uid}) or {}).get('chats', []) if c.get('account_id') == acc_id])} chats
 """
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔴 Toggle Status", callback_data=f"toggle_{acc_id}")],
@@ -498,7 +510,6 @@ Used in: {len([c for c in (await db.users.find_one({"user_id": uid}) or {}).get(
     await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.HTML)
 
 async def handle_delete_account(query, uid: int, acc_id: str):
-    """Handle account deletion confirmation"""
     acc = await db.accounts.find_one({"_id": acc_id, "user_id": uid})
     if not acc:
         await query.answer("Account not found!", show_alert=True)
@@ -511,7 +522,6 @@ async def handle_delete_account(query, uid: int, acc_id: str):
 # CHAT LOADING
 # ────────────────────────────────────────────────
 async def load_all_chats(query, uid: int, _):
-    """Load all chats from all accounts"""
     accounts = await db.accounts.find({"user_id": uid, "active": True}).to_list(50)
     if not accounts:
         await query.edit_message_text("❌ No active accounts found!", reply_markup=kb_dashboard())
@@ -527,11 +537,12 @@ async def load_all_chats(query, uid: int, _):
                 continue
             chats = []
             async for dialog in client.iter_dialogs(limit=200):
-                if (isinstance(dialog.entity, InputPeerChannel) and dialog.entity.id and dialog.entity.id < 0):
+                entity = dialog.entity
+                if isinstance(entity, InputPeerChannel) and entity.id and entity.id < 0:
                     chats.append({
-                        "chat_id": dialog.entity.id,
-                        "access_hash": getattr(dialog.entity, 'access_hash', 0),
-                        "title": getattr(dialog.entity, 'title', 'Unknown'),
+                        "chat_id": entity.id,
+                        "access_hash": getattr(entity, 'access_hash', 0),
+                        "title": getattr(entity, 'title', 'Unknown'),
                         "account_id": acc["_id"]
                     })
             if chats:
@@ -542,7 +553,7 @@ async def load_all_chats(query, uid: int, _):
                 )
                 total_chats += len(chats)
             await client.disconnect()
-            await asyncio.sleep(2)  # Rate limit protection
+            await asyncio.sleep(2)
         except Exception as e:
             logger.error(f"Chat loading failed for {acc.get('phone', 'unknown')}: {e}")
     user_doc = await db.users.find_one({"user_id": uid}) or {}
@@ -558,29 +569,26 @@ async def load_all_chats(query, uid: int, _):
 # ADVERTISING
 # ────────────────────────────────────────────────
 async def start_set_ad(query, uid: int, _):
-    """Start ad message setup"""
     user_states[uid] = {"step": "wait_ad"}
     await query.edit_message_text(
         "📢 <b>Set Advertisement</b>\n\n"
         "👉 <b>Forward ONE message</b> from your <u>Saved Messages</u>\n\n"
         "✅ This will be sent to all target chats\n"
         "📱 Supports: Text, Photos, Videos, Files, etc.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="dashboard")]]),
+        reply_markup=kb_back(),
         parse_mode=ParseMode.HTML
     )
 
 async def handle_ad_forward(uid: int, message):
-    """Handle forwarded ad message"""
     if not message.forward_origin:
         return False
-    # Check if from saved messages (self)
     is_from_self = False
     try:
         if hasattr(message.forward_origin, 'sender_user'):
             is_from_self = message.forward_origin.sender_user.is_self
         elif hasattr(message.forward_origin, 'from_id'):
             is_from_self = message.forward_origin.from_id.user_id == message.from_user.id
-    except:
+    except Exception:
         pass
     if not is_from_self:
         await message.reply_text(
@@ -589,7 +597,6 @@ async def handle_ad_forward(uid: int, message):
             parse_mode=ParseMode.HTML
         )
         return True
-    # Save ad message
     ad_data = {
         "from_peer": "me",
         "msg_id": message.forward_origin.message_id,
@@ -610,18 +617,10 @@ async def handle_ad_forward(uid: int, message):
     return True
 
 async def start_campaign(query, uid: int, context):
-    """Start advertising campaign"""
     user = await db.users.find_one({"user_id": uid})
-    if not user:
-        await query.answer("Please setup first!", show_alert=True)
+    if not user or not user.get("ad_message") or not user.get("chats"):
+        await query.answer("Please set ad message and load chats first!", show_alert=True)
         return
-    if not user.get("ad_message"):
-        await query.answer("Set ad message first!", show_alert=True)
-        return
-    if not user.get("chats"):
-        await query.answer("Load chats first!", show_alert=True)
-        return
-    # Start campaign
     await db.users.update_one({"user_id": uid}, {"$set": {"running": True}})
     if uid in ad_tasks and not ad_tasks[uid].done():
         ad_tasks[uid].cancel()
@@ -631,27 +630,24 @@ async def start_campaign(query, uid: int, context):
         "🚀 <b>Campaign Started!</b>\n\n"
         f"📱 Accounts: {await db.accounts.count_documents({'user_id': uid, 'active': True})}\n"
         f"💬 Chats: {len(user.get('chats', []))}\n"
-        f"⏱️ Anti-flood active\n\n"
+        f"⏱️ Anti‑flood active\n\n"
         "👀 Check <b>Status</b> for progress",
         reply_markup=kb_dashboard(),
         parse_mode=ParseMode.HTML
     )
 
 async def stop_campaign(query, uid: int, _):
-    """Stop advertising campaign"""
     if uid in ad_tasks:
         ad_tasks[uid].cancel()
         del ad_tasks[uid]
     await db.users.update_one({"user_id": uid}, {"$set": {"running": False}})
     await query.edit_message_text(
-        "⛔ <b>Campaign Stopped</b>\n\n"
-        "All tasks cancelled successfully.",
+        "⛔ <b>Campaign Stopped</b>\n\nAll tasks cancelled successfully.",
         reply_markup=kb_dashboard(),
         parse_mode=ParseMode.HTML
     )
 
 async def run_campaign(uid: int):
-    """Main campaign loop"""
     logger.info(f"Campaign started for user {uid}")
     try:
         while True:
@@ -664,15 +660,11 @@ async def run_campaign(uid: int):
                 await asyncio.sleep(30)
                 continue
             cycle_stats = {"sent": 0, "failed": 0, "timestamp": datetime.now(timezone.utc)}
-            # Process chats in batches
-            for i, chat in enumerate(chats[:100]):  # Limit per cycle
+            for chat in chats[:100]:
                 if not (await db.users.find_one({"user_id": uid}) or {}).get("running"):
                     break
                 try:
-                    acc = await db.accounts.find_one({
-                        "_id": chat["account_id"],
-                        "active": True
-                    })
+                    acc = await db.accounts.find_one({"_id": chat["account_id"], "active": True})
                     if not acc:
                         cycle_stats["failed"] += 1
                         continue
@@ -682,7 +674,6 @@ async def run_campaign(uid: int):
                         await client.disconnect()
                         cycle_stats["failed"] += 1
                         continue
-                    # Forward message
                     await client.forward_messages(
                         chat["chat_id"],
                         ad["msg_id"],
@@ -693,15 +684,13 @@ async def run_campaign(uid: int):
                     cycle_stats["sent"] += 1
                     logger.info(f"Sent ad to {chat['title']} using {acc['phone'][-8:]}")
                     await client.disconnect()
-                    # Smart delay
-                    delay = random.uniform(60, 180)  # 1-3 minutes
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(random.uniform(60, 180))
                 except (ChatWriteForbiddenError, PeerFloodError) as e:
                     cycle_stats["failed"] += 1
-                    logger.warning(f"Send failed {chat.get('title', 'unknown')}: {type(e).__name__}")
+                    logger.warning(f"Send failed {chat.get('title','unknown')}: {type(e).__name__}")
                 except FloodWaitError as e:
                     cycle_stats["failed"] += 1
-                    wait_time = min(e.seconds + 60, 900)  # Max 15 min
+                    wait_time = min(e.seconds + 60, 900)
                     logger.warning(f"Flood wait: {wait_time}s")
                     await asyncio.sleep(wait_time)
                 except Exception as e:
@@ -710,15 +699,10 @@ async def run_campaign(uid: int):
                 finally:
                     try:
                         await client.disconnect()
-                    except:
+                    except Exception:
                         pass
-            # Log cycle stats
-            await db.users.update_one(
-                {"user_id": uid},
-                {"$push": {"stats": cycle_stats}}
-            )
-            # Long cycle break
-            await asyncio.sleep(random.uniform(1800, 3600))  # 30-60 minutes
+            await db.users.update_one({"user_id": uid}, {"$push": {"stats": cycle_stats}})
+            await asyncio.sleep(random.uniform(1800, 3600))
     except asyncio.CancelledError:
         logger.info(f"Campaign {uid} cancelled")
     except Exception as e:
@@ -727,17 +711,14 @@ async def run_campaign(uid: int):
         await db.users.update_one({"user_id": uid}, {"$set": {"running": False}})
 
 async def show_status(query, uid: int, _):
-    """Show campaign status"""
     user_doc = await db.users.find_one({"user_id": uid}) or {}
     acc_count = await db.accounts.count_documents({"user_id": uid, "active": True})
-    stats = user_doc.get("stats", [])
-    recent_stats = stats[-5:] if stats else []
+    stats = user_doc.get("stats", [])[-5:]
     logs_text = ""
     total_sent = total_failed = 0
-    for stat in recent_stats:
+    for stat in stats:
         ts = stat["timestamp"].strftime("%H:%M")
-        sent = stat["sent"]
-        failed = stat["failed"]
+        sent, failed = stat["sent"], stat["failed"]
         logs_text += f"• {ts}: ✅{sent} ❌{failed}\n"
         total_sent += sent
         total_failed += failed
@@ -756,12 +737,11 @@ async def show_status(query, uid: int, _):
     await query.edit_message_text(text, reply_markup=kb_dashboard(), parse_mode=ParseMode.HTML)
 
 async def show_delays(query, uid: int, _):
-    """Show delay settings (placeholder for future)"""
     text = """
 ⏱️ <b>Delay Settings</b>
 Current smart delays:
-• Message delay: 60-180s
-• Cycle delay: 30-60min
+• Message delay: 60‑180s
+• Cycle delay: 30‑60min
 • Flood protection: Auto
 ✅ Already optimized for safety!
 """
@@ -771,70 +751,62 @@ Current smart delays:
 # MESSAGE HANDLER
 # ────────────────────────────────────────────────
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text and forwarded messages"""
     uid = update.effective_user.id
     msg = update.message
     text = msg.text.strip() if msg.text else ""
     state = user_states.get(uid, {})
-    # Phone input
     if state.get("step") == "phone" and text.startswith('+'):
         await handle_phone_message(uid, text, msg)
         return
-    # Ad message forward
     if state.get("step") == "wait_ad" and msg.forward_origin:
         if await handle_ad_forward(uid, msg):
             return
-    # Fallback
     await msg.reply_text("Use the buttons or /start", reply_markup=kb_welcome())
 
 # ────────────────────────────────────────────────
-# MAIN
+# MAIN ENTRY (with single‑instance lock)
 # ────────────────────────────────────────────────
 async def main():
-    """Main application entry point"""
-    print("🚀 ADIMYZE PRO v12 starting...")
-    # Test database connection
+    pid_file = acquire_lock()
     try:
-        await db.command('ping')
-        print("✅ MongoDB connected")
-    except Exception as e:
-        print(f"❌ MongoDB error: {e}")
-        return
-    app = Application.builder().token(BOT_TOKEN).build()
-    # Handlers - FIXED LINE HERE
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CallbackQueryHandler(cb_handler))
-    app.add_handler(MessageHandler(
-        (filters.TEXT | filters.FORWARDED) & ~filters.COMMAND,
-        message_handler
-    ))
-    # Start bot
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling(drop_pending_updates=True, timeout=45)
-    print("✅ Bot running! Press Ctrl+C to stop.")
-    # Graceful shutdown
-    try:
-        while True:
-            await asyncio.sleep(3600)
-    except KeyboardInterrupt:
-        print("\n🛑 Shutting down...")
-        # Cancel all campaigns
-        for task in list(ad_tasks.values()):
-            if not task.done():
-                task.cancel()
-        # Cleanup
-        await app.updater.stop()
-        await app.stop()
-        await app.shutdown()
-        # Close clients
-        for client in clients_cache.values():
-            try:
-                await client.disconnect()
-            except:
-                pass
-        mongo_client.close()
-        print("✅ Shutdown complete!")
+        print("🚀 ADIMYZE PRO v12 starting...")
+        try:
+            await db.command('ping')
+            print("✅ MongoDB connected")
+        except Exception as e:
+            print(f"❌ MongoDB error: {e}")
+            return
+        app = Application.builder().token(BOT_TOKEN).build()
+        app.add_handler(CommandHandler("start", cmd_start))
+        app.add_handler(CallbackQueryHandler(cb_handler))
+        app.add_handler(MessageHandler(
+            (filters.TEXT | filters.FORWARDED) & ~filters.COMMAND,
+            message_handler
+        ))
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True, timeout=45)
+        print("✅ Bot running! Press Ctrl+C to stop.")
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except KeyboardInterrupt:
+            print("\n🛑 Shutting down...")
+            for task in list(ad_tasks.values()):
+                if not task.done():
+                    task.cancel()
+            await app.updater.stop()
+            await app.stop()
+            await app.shutdown()
+            for client in clients_cache.values():
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+            mongo_client.close()
+            print("✅ Shutdown complete!")
+    finally:
+        release_lock(pid_file)
 
 if __name__ == "__main__":
     try:
