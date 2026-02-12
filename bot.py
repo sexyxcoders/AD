@@ -9,7 +9,7 @@ import random
 logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
 # Telegram Bot Token
-bot_token = 'YOUR_BOT_TOKEN'  # Use your actual bot token here
+bot_token = '8463982454:AAFXhclFtn5cCoJLZl3l-SwhPMk3ssv6J8o'  # Use your actual bot token here
 bot = Bot(token=bot_token)
 
 # Set up the bot with handlers
