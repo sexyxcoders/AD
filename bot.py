@@ -53,9 +53,9 @@ from bson import ObjectId
 # ────────────────────────────────────────────────
 # CONFIG & CONSTANTS
 # ────────────────────────────────────────────────
-BOT_TOKEN = '8463982454:AAFXhclFtn5cCoJLZl3l-SwhPMk3ssv6J8o'
+BOT_TOKEN = "8463982454:AAFXhclFtn5cCoJLZl3l-SwhPMk3ssv6J8o"
 API_ID = 22657083
-API_HASH = 'd6186691704bd901bdab275ceaab88f3'
+API_HASH = "d6186691704bd901bdab275ceaab88f3"
 MONGO_URI = "mongodb+srv://StarGiftBot_db_user:gld1RLm4eYbCWZlC@cluster0.erob6sp.mongodb.net/?retryWrites=true&w=majority"
 DB_NAME = "adimyze"
 CHANNEL_LINK = "https://t.me/testttxs"
