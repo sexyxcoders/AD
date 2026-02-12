@@ -22,7 +22,7 @@ API_HASH = 'd6186691704bd901bdab275ceaab88f3'
 
 # MONGO URI - UPDATE THIS
 MONGO_URI = "mongodb+srv://StarGiftBot_db_user:gld1RLm4eYbCWZlC@cluster0.erob6sp.mongodb.net/?appName=Cluster0"
-CHANNEL_URL = "https://t.me/adimyzepro"  # MUST JOIN CHANNEL
+CHANNEL_URL = "https://t.me/testttxs"  # MUST JOIN CHANNEL
 CHANNEL_ID = -1001234567890  # GET FROM @username_to_id_bot or browser inspect
 
 # Images - Optional
