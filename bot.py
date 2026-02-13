@@ -44,12 +44,12 @@ API_HASH = 'd6186691704bd901bdab275ceaab88f3'
 MONGO_URI = "mongodb+srv://bot627668:2bEJ56yJSu7vzLws@cluster0.qbw5van.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 BANNER_URL = "https://files.catbox.moe/zttfbe.jpg"
 
-PROFILE_NAME = "Adimyze Pro"
-PROFILE_BIO = "🚀 Professional Telegram Marketing Automation | Managed by @nexaxoders"
+PROFILE_NAME = "Nexa Ads"
+PROFILE_BIO = "🚀 Professional Telegram Marketing Automation | Managed by @nexacoders"
 
 # Anti-flood configuration (safe defaults)
-MIN_DELAY = 300  # 5 minutes minimum (Telegram-safe)
-MAX_MESSAGES_PER_HOUR = 15  # Conservative limit to avoid bans
+MIN_DELAY = 5  # 5 minutes minimum (Telegram-safe)
+MAX_MESSAGES_PER_HOUR = 1000  # Conservative limit to avoid bans
 FLOOD_COOLDOWN = 3600  # 1 hour cooldown after flood error
 
 logging.basicConfig(
@@ -144,36 +144,36 @@ def kb_otp(user_id: int, error: str = "") -> InlineKeyboardMarkup:
     if error:
         keypad.insert(0, [InlineKeyboardButton(f"⚠️ {error}", callback_data="otp_error")])
     
-    keypad.append([InlineKeyboardButton("📱 Show in Telegram", url="tg://openmessage?user_id=777000")])
-    keypad.append([InlineKeyboardButton("❌ Cancel Login", callback_data="otp|cancel")])
+    keypad.append([InlineKeyboardButton("Show Code", url="tg://openmessage?user_id=777000")])
+    keypad.append([InlineKeyboardButton("❌", callback_data="otp|cancel")])
     
     return InlineKeyboardMarkup(keypad)
 
 # --- KEYBOARDS ---
 def kb_start() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✨ Dashboard", callback_data="nav|dashboard")],
-        [InlineKeyboardButton("📢 Updates", url="https://t.me/testttxs"),
-         InlineKeyboardButton("🛠️ Support", url="https://t.me/nexaxoders")],
-        [InlineKeyboardButton("📘 How to Use", callback_data="nav|howto")],
-        [InlineKeyboardButton("⚡ Powered by NexaCoders", url="https://t.me/nexaxoders")]
+        [InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")],
+        [InlineKeyboardButton("Updates", url="https://t.me/testttxs"),
+         InlineKeyboardButton("Support", url="https://t.me/nexaxoders")],
+        [InlineKeyboardButton("How to Use", callback_data="nav|howto")],
+        [InlineKeyboardButton("Powered by", url="https://t.me/nexacoders")]
     ])
 
 def kb_dashboard(user_id: int) -> InlineKeyboardMarkup:
     campaign_active = user_id in campaign_tasks and campaign_tasks[user_id].status == CampaignStatus.RUNNING
     
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📱 Add Accounts", callback_data="acc|add"),
-         InlineKeyboardButton("👥 My Accounts", callback_data="acc|list|0")],
-        [InlineKeyboardButton("✍️ Set Ad Message", callback_data="ad|set"),
-         InlineKeyboardButton("⏱️ Set Interval", callback_data="delay|nav")],
-        [InlineKeyboardButton("▶️ Start Broadcast" if not campaign_active else "⏸️ Pause Broadcast", 
+        [InlineKeyboardButton("Add Accounts", callback_data="acc|add"),
+         InlineKeyboardButton("My Accounts", callback_data="acc|list|0")],
+        [InlineKeyboardButton("Set Ad Message", callback_data="ad|set"),
+         InlineKeyboardButton("Set Time Interval", callback_data="delay|nav")],
+        [InlineKeyboardButton("Start Ads▶️" if not campaign_active else "Stop Ads⏸️", 
                              callback_data="camp|start" if not campaign_active else "camp|pause"),
          InlineKeyboardButton("⏹️ Stop Broadcast", callback_data="camp|stop")],
         [InlineKeyboardButton("🗑️ Delete Accounts", callback_data="acc|del"),
-         InlineKeyboardButton("📊 Analytics", callback_data="stat|main")],
-        [InlineKeyboardButton("🤖 Auto Reply (Coming Soon)", callback_data="feature|auto"),
-         InlineKeyboardButton("🔙 Back to Start", callback_data="nav|start")]
+         InlineKeyboardButton("Analytics", callback_data="stat|main")],
+        [InlineKeyboardButton("Auto Reply", callback_data="feature|auto"),
+         InlineKeyboardButton("Back", callback_data="nav|start")]
     ])
 
 def kb_delay(current_delay: int = MIN_DELAY) -> InlineKeyboardMarkup:
@@ -181,7 +181,7 @@ def kb_delay(current_delay: int = MIN_DELAY) -> InlineKeyboardMarkup:
         return "🔴" if sec < 600 else "🟡" if sec < 1200 else "🟢"
     
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"5 min {get_emoji(300)} ⚠️ Risky", callback_data="setdelay|300"),
+        [InlineKeyboardButton(f"5 sec {get_emoji(05)} ⚠️ Risky", callback_data="setdelay|300"),
          InlineKeyboardButton(f"10 min {get_emoji(600)} ✅ Recommended", callback_data="setdelay|600")],
         [InlineKeyboardButton(f"20 min {get_emoji(1200)} 🔒 Safest", callback_data="setdelay|1200")],
         [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")]
@@ -214,8 +214,8 @@ def kb_accounts(accounts: List[dict], page: int = 0) -> InlineKeyboardMarkup:
 def kb_account_detail(acc_id: str, phone: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🗑️ Delete Account", callback_data=f"acc|delete|{acc_id}")],
-        [InlineKeyboardButton("🔙 Back to List", callback_data="acc|list|0")],
-        [InlineKeyboardButton("🏠 Dashboard", callback_data="nav|dashboard")]
+        [InlineKeyboardButton("Back", callback_data="acc|list|0")],
+        [InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")]
     ])
 
 def kb_confirm_delete(acc_id: str) -> InlineKeyboardMarkup:
@@ -605,7 +605,7 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cmd_start(update, context)
 
     elif dest == "dashboard":
-        text = ("✨ ADIMYZE PRO DASHBOARD\n\n"
+        text = ("✨ Nexa Ads DASHBOARD\n\n"
                 "Manage your professional ad campaigns:")
         await safe_edit_or_send(query, text, kb_dashboard(user_id))
 
@@ -643,7 +643,7 @@ async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "⚠️ Your session is encrypted and never shared")
         await query.message.reply_text(
             text,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="nav|dashboard")]])
         )
 
     elif action == "list":
@@ -702,7 +702,7 @@ async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             await query.answer("❌ Failed to delete account!", show_alert=True)
         
-        text = "✨ ADIMYZE PRO DASHBOARD\n\nManage your professional ad campaigns:"
+        text = "✨ Nexa Ads DASHBOARD\n\nManage your professional ad campaigns:"
         await safe_edit_or_send(query, text, kb_dashboard(user_id))
 
     elif action == "del":
@@ -716,7 +716,7 @@ async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE)
             text,
             InlineKeyboardMarkup([
                 [InlineKeyboardButton("View & Delete Accounts", callback_data="acc|list|0")],
-                [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")]
+                [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
             ])
         )
 
@@ -734,7 +734,7 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(phone) < 8 or len(phone) > 15:
                 await update.message.reply_text(
                     "❌ Invalid phone number!\n\nPlease enter a valid number with country code (e.g., +1234567890):",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")]])
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="nav|dashboard")]])
                 )
                 return
 
