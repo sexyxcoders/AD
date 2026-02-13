@@ -152,6 +152,19 @@ def kb_otp(user_id):
         [InlineKeyboardButton("Show Code", url="tg://openmessage?user_id=777000")]
     ])
 
+async def otp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    data = query.data
+
+    if data == "otp|cancel":
+        # Clear OTP buffer
+        user_states[user_id] = UserState()
+
+        await query.message.edit_text("OTP entry cancelled.")
+        return
+
+
 def kb_delay(current_delay=300):
     def get_emoji(sec):
         if sec <= 300: return "🔴"
