@@ -131,7 +131,8 @@ def kb_otp(user_id):
     display = (state.buffer + "○" * (5 - len(state.buffer)))[:5]
 
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"Current: {display}", callback_data="noop")],
+        # OTP masked display (not clickable)
+        [InlineKeyboardButton(f"OTP: {display}", callback_data="ignore")],
 
         [InlineKeyboardButton("1", callback_data="otp|1"),
          InlineKeyboardButton("2", callback_data="otp|2"),
@@ -147,22 +148,10 @@ def kb_otp(user_id):
 
         [InlineKeyboardButton("⌫", callback_data="otp|back"),
          InlineKeyboardButton("0", callback_data="otp|0"),
-         InlineKeyboardButton("❌", callback_data="otp|cancel")],
+         InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")],
 
         [InlineKeyboardButton("Show Code", url="tg://openmessage?user_id=777000")]
     ])
-
-async def otp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    data = query.data
-
-    if data == "otp|cancel":
-        # Clear OTP buffer
-        user_states[user_id] = UserState()
-
-        await query.message.edit_text("OTP entry cancelled.")
-        return
 
 
 def kb_delay(current_delay=300):
