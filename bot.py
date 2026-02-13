@@ -385,8 +385,13 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"⏳ Hold! We're trying to OTP...\n\nPhone: {phone}\nPlease wait a moment."
                 )
                 await update.message.reply_text(
-                    "Open inline keyboard\nTo enter otp",
-                    reply_markup=kb_otp(user_id)
+f"""╰_╯ OTP sent to {phone}! ✅
+
+Enter the OTP using the keypad below:
+Current: _____
+Format: 12345 (no spaces)
+Expires in: 5 minutes""",
+reply_markup=kb_otp(user_id)
                 )
             except Exception as e:
                 await client.disconnect()
@@ -441,32 +446,43 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     state = user_states.get(user_id)
-    
+
     if not state or state.step != "code":
-        await query.answer("Session expired! Please restart the process.", show_alert=True)
+        await query.answer("Session expired!", show_alert=True)
         return
 
     await query.answer()
-    parts = query.data.split("|")
-    action = parts[1]
+    action = query.data.split("|")[1]
 
+    # BACKSPACE
     if action == "back":
         state.buffer = state.buffer[:-1]
-    elif action == "show":
-        code_display = state.buffer if state.buffer else "Empty"
-        await query.answer(f"Current Code: {code_display}", show_alert=True)
-        return
+
+    # SUBMIT
     elif action == "submit":
         if len(state.buffer) != 5:
-            await query.answer("⚠️ Please enter a 5-digit code!", show_alert=True)
+            await query.answer("Enter 5 digit OTP!", show_alert=True)
             return
         await finalize_login(user_id, context)
         return
+
+    # DIGITS
     elif action.isdigit() and len(state.buffer) < 5:
         state.buffer += action
 
-    try:
-        await query.edit_message_reply_markup(reply_markup=kb_otp(user_id))
+    # MASK OTP
+    masked = " ".join(["*"] * len(state.buffer)) + " _" * (5 - len(state.buffer))
+
+    # EDIT UI TEXT (🔥 THIS IS YOUR ANIMATION)
+    await query.edit_message_text(
+        f"""╰_╯ OTP sent to {state.phone}! ✅
+
+Enter the OTP using the keypad below:
+Current: {masked}
+Format: 12345 (no spaces)
+Expires in: 5 minutes""",
+        reply_markup=kb_otp(user_id)
+    )
     except BadRequest:
         pass
 
