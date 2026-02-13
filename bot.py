@@ -506,13 +506,12 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_navigation, pattern=r"^nav\|"))
     app.add_handler(CallbackQueryHandler(handle_account_ops, pattern=r"^acc\|"))
     app.add_handler(CallbackQueryHandler(handle_otp_input, pattern=r"^otp\|"))
-    app.add_handler(CallbackQueryHandler(lambda u,c: u.callback_query.answer(), pattern=r"^ignore$"))
+    app.add_handler(CallbackQueryHandler(lambda u, c: u.callback_query.answer(), pattern=r"^ignore$"))
 
-    # Text input for phone, password, ad message
-    app.add_handler(MessageHandlerfilters.TEXT & (\~filters.COMMAND) handle_text_input))
-
-    # TODO: implement campaign start/stop + actual broadcasting loop
-    # app.add_handler(CallbackQueryHandler(campaign_control, pattern=r"^camp\|"))
+    # Text input handler (phone, password, ad message)
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input)
+    )
 
     print("Bot is starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
