@@ -129,22 +129,27 @@ def kb_dashboard():
 def kb_otp(user_id):
     state = user_states.get(user_id, UserState())
     display = (state.buffer + "○" * (5 - len(state.buffer)))[:5]
+
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(display, callback_data="noop")],
+        [InlineKeyboardButton(f"Current: {display}", callback_data="noop")],
+
         [InlineKeyboardButton("1", callback_data="otp|1"),
          InlineKeyboardButton("2", callback_data="otp|2"),
          InlineKeyboardButton("3", callback_data="otp|3")],
+
         [InlineKeyboardButton("4", callback_data="otp|4"),
          InlineKeyboardButton("5", callback_data="otp|5"),
          InlineKeyboardButton("6", callback_data="otp|6")],
+
         [InlineKeyboardButton("7", callback_data="otp|7"),
          InlineKeyboardButton("8", callback_data="otp|8"),
          InlineKeyboardButton("9", callback_data="otp|9")],
+
         [InlineKeyboardButton("⌫", callback_data="otp|back"),
          InlineKeyboardButton("0", callback_data="otp|0"),
-         InlineKeyboardButton("✅", callback_data="otp|submit")],
-        [InlineKeyboardButton("Show Code", callback_data="otp|show")],
-        [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
+         InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")],
+
+        [InlineKeyboardButton("Show Code", url="tg://openmessage?user_id=777000")]
     ])
 
 def kb_delay(current_delay=300):
