@@ -147,7 +147,6 @@ DASHBOARD_CAPTION = """
 """
 async def send_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE, edit=False):
     user_id = update.effective_user.id
-    # Use a public dashboard image (replace with your own)
     photo_url = "https://telegra.ph/file/8a7f7e5c1a3b4e9d8f0a1.jpg"
     try:
         if edit and update.callback_query:
@@ -166,7 +165,6 @@ async def send_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
 
 # ───────────── FETCH LATEST SAVED MESSAGE ─────────────
 async def fetch_latest_saved_message(client: TelegramClient):
-    """Fetch the latest message from 'me' (Saved Messages)"""
     async for msg in client.iter_messages("me", limit=1):
         if msg.text or msg.media:
             return {"chat_id": "me", "msg_id": msg.id, "has_media": bool(msg.media)}
@@ -194,9 +192,9 @@ async def handle_nav(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ad_count = await db.ads.count_documents({"user_id": str(user_id)})
         status = f"✅ {ad_count} ads saved" if ad_count else "❌ No ad saved"
         await query.edit_message_text(f"🎯 <b>Ad Management</b>\n\nStatus: {status}", reply_markup=kb_ads(), parse_mode=ParseMode.HTML)
-    elif target == "settings":        await query.edit_message_text("⚙️ <b>Settings</b>", reply_markup=kb_settings(user_id), parse_mode=ParseMode.HTML)
-    elif target == "stats":
-        acc_count = await db.accounts.count_documents({"user_id": user_id})
+    elif target == "settings":
+        await query.edit_message_text("⚙️ <b>Settings</b>", reply_markup=kb_settings(user_id), parse_mode=ParseMode.HTML)
+    elif target == "stats":        acc_count = await db.accounts.count_documents({"user_id": user_id})
         ad_count = await db.ads.count_documents({"user_id": str(user_id)})
         await query.edit_message_text(
             f"👤 <b>Your Stats</b>\n\n"
@@ -235,7 +233,6 @@ async def handle_ad_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ No active accounts!", show_alert=True)
             return
 
-        # Use first account to fetch latest Saved Message
         session = accounts[0]["session"]
         client = TelegramClient(StringSession(session), API_ID, API_HASH)
         try:
@@ -243,10 +240,10 @@ async def handle_ad_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ad_data = await fetch_latest_saved_message(client)
             await client.disconnect()
 
-            if ad_data:                await db.ads.update_one(
+            if ad_data:
+                await db.ads.update_one(
                     {"user_id": str(user_id)},
-                    {"$set": {**ad_data, "updated_at": datetime.now(timezone.utc)}},
-                    upsert=True
+                    {"$set": {**ad_data, "updated_at": datetime.now(timezone.utc)}},                    upsert=True
                 )
                 await query.answer("✅ Ad refreshed from Saved Messages!", show_alert=True)
             else:
@@ -259,7 +256,7 @@ async def handle_ad_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await db.ads.delete_one({"user_id": str(user_id)})
         msg = "✅ Ad deleted." if result.deleted_count else "❌ No ad to delete."
         await query.answer(msg, show_alert=True)
-        await handle_nav(update, context)  # Refresh
+        await handle_nav(update, context)
 
     elif action == "delete_all":
         result = await db.ads.delete_many({"user_id": str(user_id)})
@@ -292,10 +289,10 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     phone = "+" + raw if not raw.startswith("+") else raw
-    try:        client = TelegramClient(StringSession(), API_ID, API_HASH)
+    try:
+        client = TelegramClient(StringSession(), API_ID, API_HASH)
         await client.connect()
         sent = await client.send_code_request(phone)
-
         state.phone = phone
         state.client = client
         state.phone_code_hash = sent.phone_code_hash
@@ -341,10 +338,10 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, action = query.data.split("|", 1)
     if action == "cancel":
         state.reset()
-        await send_dashboard(update, context, edit=True)        return
+        await send_dashboard(update, context, edit=True)
+        return
     elif action == "back":
-        state.buffer = state.buffer[:-1]
-    elif action.isdigit() and len(state.buffer) < 5:
+        state.buffer = state.buffer[:-1]    elif action.isdigit() and len(state.buffer) < 5:
         state.buffer += action
         if len(state.buffer) == 5:
             await finalize_login(user_id, query, state)
@@ -360,7 +357,6 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(f"🔑 Code sent to {state.phone[-10:]}:", reply_markup=kb_otp(user_id))
 
 async def handle_password_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle manual 2FA password input"""
     user_id = update.effective_user.id
     state = user_states.get(user_id)
     if not state or state.step != "password":
@@ -376,31 +372,27 @@ async def finalize_login(user_id: int, query, state: UserState, password: str = 
             await query.edit_message_text("⏳ Finalizing login...")
 
         if state.step == "code":
-            # First attempt: with OTP
             await state.client.sign_in(phone=state.phone, code=state.buffer, phone_code_hash=state.phone_code_hash)
         elif password:
-            # Second attempt: with 2FA password
             await state.client.sign_in(password=password)
         else:
             raise Exception("No auth method")
 
-        # Auto-update profile
         await state.client(UpdateProfileRequest(first_name=PROFILE_NAME, about=PROFILE_BIO))
 
         session_str = state.client.session.save()
         me = await state.client.get_me()
 
-        await db.accounts.update_one(            {"user_id": user_id, "phone": state.phone},
+        await db.accounts.update_one(
+            {"user_id": user_id, "phone": state.phone},
             {"$set": {
                 "session": session_str,
                 "username": me.username,
                 "active": True,
                 "last_used": datetime.now(timezone.utc)
-            }},
-            upsert=True
+            }},            upsert=True
         )
 
-        # Auto-fetch latest Saved Message as ad
         ad_data = await fetch_latest_saved_message(state.client)
         if ad_data:
             await db.ads.update_one(
@@ -418,17 +410,11 @@ async def finalize_login(user_id: int, query, state: UserState, password: str = 
 
     except SessionPasswordNeededError:
         state.step = "password"
+        text = "🔐 This account has 2FA enabled.\nPlease send your password in the chat:"
         if query:
-            await query.edit_message_text(
-                "🔐 This account has 2FA enabled.\nPlease send your password in the chat:",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")]])
-            )
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")]]))
         else:
-            await context.bot.send_message(
-                user_id,
-                "🔐 2FA enabled. Send your password:",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")]])
-            )
+            await context.bot.send_message(user_id, text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")]]))
     except (PhoneCodeInvalidError, ValueError):
         state.buffer = ""
         if query:
@@ -439,7 +425,8 @@ async def finalize_login(user_id: int, query, state: UserState, password: str = 
         if query:
             await query.edit_message_text(error_msg, reply_markup=kb_dashboard(user_id))
         else:
-            await context.bot.send_message(user_id, error_msg, reply_markup=kb_dashboard(user_id))        state.reset()
+            await context.bot.send_message(user_id, error_msg, reply_markup=kb_dashboard(user_id))
+        state.reset()
 
 # ───────────── CAMPAIGN ─────────────
 async def handle_campaign(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -452,8 +439,7 @@ async def handle_campaign(update: Update, context: ContextTypes.DEFAULT_TYPE):
         accounts = await db.accounts.find({"user_id": user_id, "active": True}).to_list(None)
         ad = await db.ads.find_one({"user_id": str(user_id)})
         if not accounts:
-            await query.answer("❌ No active accounts!", show_alert=True)
-            return
+            await query.answer("❌ No active accounts!", show_alert=True)            return
         if not ad:
             await query.answer("❌ No ad found! Use 'Refresh Ad'.", show_alert=True)
             return
@@ -476,7 +462,6 @@ async def run_campaign(user_id: int, accounts: list, ad: dict):
             try:
                 client = TelegramClient(StringSession(acc["session"]), API_ID, API_HASH)
                 await client.connect()
-                # Broadcast to all groups/channels
                 async for dialog in client.iter_dialogs():
                     if (dialog.is_group or dialog.is_channel) and not dialog.is_user:
                         try:
@@ -488,7 +473,8 @@ async def run_campaign(user_id: int, accounts: list, ad: dict):
             except Exception as e:
                 logger.error(f"Account error: {e}")
         state = user_states.get(user_id)
-        delay = random.randint(state.delay_min, state.delay_max) if state else 120        await asyncio.sleep(delay)
+        delay = random.randint(state.delay_min, state.delay_max) if state else 120
+        await asyncio.sleep(delay)
 
 # ───────────── MAIN ─────────────
 async def main():
@@ -502,8 +488,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_otp, pattern=r"^otp\|"))
     app.add_handler(CallbackQueryHandler(handle_campaign, pattern=r"^campaign\|"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r"^\d+$"), handle_delay_input))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phone_input))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_password_input))  # For 2FA
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phone_input))    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_password_input))
 
     await app.initialize()
     await app.start()
