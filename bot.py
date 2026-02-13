@@ -289,17 +289,19 @@ async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     elif action == "list":
-        page = int(parts[2])
-        accounts = await db.accounts.find({"user_id": user_id}).to_list(None)
+    page = int(parts[2])
+    accounts = await db.accounts.find({"user_id": user_id}).to_list(None)
 
-        if not accounts:            await query.answer("No accounts added yet!", show_alert=True)
-            markup, text = await kb_dashboard(user_id)
-            await safe_edit_or_send(query, text, markup)
-            return
+    if not accounts:
+        await query.answer("No accounts added yet!", show_alert=True)
 
-        text = f"📱 MY ACCOUNTS ({len(accounts)})\n\nSelect an account to manage:"
-        await safe_edit_or_send(query, text, kb_accounts(accounts, page))
+        markup, text = await kb_dashboard(user_id)
+        await safe_edit_or_send(query, text, markup)
         return
+
+    text = f"📱 MY ACCOUNTS ({len(accounts)})\n\nSelect an account to manage:"
+    await safe_edit_or_send(query, text, kb_accounts(accounts, page))
+    return
 
     elif action == "detail":
         acc_id = parts[2]
