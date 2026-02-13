@@ -282,22 +282,30 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="nav|dashboard")]])
         await safe_edit_or_send(query, text, markup)
 
-async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE):    query = update.callback_query
+async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
     await query.answer()
+
     parts = query.data.split("|")
     action = parts[1]
     user_id = query.from_user.id
 
     if action == "add":
         user_states[user_id] = UserState(step="phone")
-        text = ("╰_╯HOST NEW ACCOUNT\n\n"
-                "Secure Account Hosting\n\n"
-                "Enter your phone number with country code:\n"
-                "Example: +1234567890\n\n"
-                "Your data is encrypted and secure")
+
+        text = (
+            "╰_╯ HOST NEW ACCOUNT\n\n"
+            "Secure Account Hosting\n\n"
+            "Enter your phone number with country code:\n"
+            "Example: +1234567890\n\n"
+            "Your data is encrypted and secure"
+        )
+
         await query.message.reply_text(
-            text,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="nav|dashboard")]])
+            text=text,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("Back", callback_data="nav|dashboard")]]
+            )
         )
         return
 
