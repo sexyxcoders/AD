@@ -67,28 +67,42 @@ campaign_tasks: Dict[int, asyncio.Task] = {}
 
 async def safe_edit_or_send(query, text: str, reply_markup=None):
     try:
-        await query.edit_message_caption(caption=text, reply_markup=reply_markup)
+        await query.edit_message_caption(
+            caption=text,
+            reply_markup=reply_markup
+        )
+
     except BadRequest as e:
         err = str(e).lower()
+
         if "message is not modified" in err:
             return
-        if "not found" in err or "can't be edited" in err:            await query.message.reply_photo(
+
+        if "not found" in err or "can't be edited" in err:
+            await query.message.reply_photo(
                 photo=BANNER_URL,
                 caption=text,
                 reply_markup=reply_markup
             )
             try:
                 await query.message.delete()
-            except:
+            except Exception:
                 pass
+
         else:
             try:
-                await query.edit_message_text(text=text, reply_markup=reply_markup)
-            except:
-                await query.message.reply_text(text=text, reply_markup=reply_markup)
+                await query.edit_message_text(
+                    text=text,
+                    reply_markup=reply_markup
+                )
+            except Exception:
+                await query.message.reply_text(
+                    text=text,
+                    reply_markup=reply_markup
+                )
                 try:
                     await query.message.delete()
-                except:
+                except Exception:
                     pass
 
 # ────────────────────────────────────────────────
