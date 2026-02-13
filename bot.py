@@ -341,7 +341,8 @@ async def handle_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=kb_analytics_detailed()
         )
     elif view == "detailed":
-        date = datetime.now().strftime("%d/%m/%y")        inactive_acc = accounts - active_acc
+        date = datetime.now().strftime("%d/%m/%y")
+        inactive_acc = accounts - active_acc
         await query.edit_message_text(
             DETAILED_REPORT.format(
                 date=date,
