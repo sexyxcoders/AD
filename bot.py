@@ -1,1644 +1,518 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-ADIMYZE PRO v15 — Telegram Bulk Forwarding & Marketing Automation
-✅ 100% Working | Gold UI Theme | Premium Features | Sudo Management
-Author: @nexaxoders | Complete Rewrite with Gold UI
-"""
 import asyncio
-import random
 import logging
 import re
 import sys
 import os
-import fcntl
-import string
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+import random
+from datetime import datetime, timezone
+from typing import Dict, Optional
 from dataclasses import dataclass, field
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pathlib import Path
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
-    filters,
     ContextTypes,
+    filters,
 )
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, Forbidden, TelegramError
+from telegram.error import BadRequest
+
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.account import UpdateProfileRequest
-from telethon.tl.functions.channels import GetFullChannelRequest
-from telethon.tl.types import InputPeerChannel, Channel, Chat, User
 from telethon.errors import (
     SessionPasswordNeededError,
     PhoneCodeInvalidError,
-    PhoneCodeEmptyError,
-    FloodWaitError,
-    UsernameOccupiedError,
-    ChatWriteForbiddenError,
-    PeerFloodError,
-    PasswordHashInvalidError,
     PhoneNumberInvalidError,
-    AuthKeyUnregisteredError,
-    UserDeactivatedError,
-    SessionRevokedError,
+    FloodWaitError,
 )
-from motor.motor_asyncio import AsyncIOMotorClient
-from bson import ObjectId
 
-# ────────────────────────────────────────────────
-# CONFIGURATION & CONSTANTS
-# ────────────────────────────────────────────────
+from motor.motor_asyncio import AsyncIOMotorClient
+
+# ───────────── CONFIGURATION ─────────────
 BOT_TOKEN = '8463982454:AAErd8EZswKgQ1BNF_r-N8iUH8HQcb293lQ'
 API_ID = 22657083
 API_HASH = 'd6186691704bd901bdab275ceaab88f3'
 MONGO_URI = "mongodb+srv://bot627668:2bEJ56yJSu7vzLws@cluster0.qbw5van.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 DB_NAME = "adimyze"
-SUPPORT_CHANNEL = "https://t.me/testttxs"
-SUPPORT_GROUP = "https://t.me/nexaxoders"
+
+SUDO_USERS = [2083251445]
 PROFILE_NAME = "Adimyze Pro"
 PROFILE_BIO = "🚀 Professional Telegram Marketing Automation | Managed by @nexaxoders"
+SUPPORT_LINK = "https://t.me/nexaxoders"
+UPDATE_CHANNEL = "https://t.me/testttxs"
 
-# Sudo configuration
-SUDO_USERS = [2083251445]  # Add your user ID here as the owner
-PREMIUM_USERS = []  # Will be populated from DB
-
-# Logging configuration
 logging.basicConfig(
-    format='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
-    level=logging.INFO,
-    datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[
-        logging.FileHandler("adimyze_pro.log", encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
-    ]
+    format='%(asctime)s | %(levelname)s | %(message)s',    level=logging.INFO,
+    handlers=[logging.FileHandler("adimyze.log"), logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
-# Database connection
-mongo_client = AsyncIOMotorClient(MONGO_URI, maxPoolSize=50, minPoolSize=5)
+mongo_client = AsyncIOMotorClient(MONGO_URI)
 db = mongo_client[DB_NAME]
+PID_FILE = Path("/tmp/adimyze_pro_v19.pid")
 
-# Global state management
+# ───────────── USER STATE ─────────────
 @dataclass
 class UserState:
-    step: str = "idle"
+    step: str = "idle"  # idle, phone, code, password, set_min_delay, set_max_delay
     phone: str = ""
     phone_code_hash: str = ""
-    buffer: str = ""
     client: Optional[TelegramClient] = None
-    session_string: str = ""
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    ad_message: Optional[Dict] = None
-    selected_account: Optional[str] = None
-    delay_config: Dict = field(default_factory=lambda: {"min": 60, "max": 180})
-    campaign_settings: Dict = field(default_factory=lambda: {
-        "smart_rotate": False,
-        "auto_sleep": False,
-        "auto_join": False,
-        "auto_reply": False
-    })
+    buffer: str = ""
+    delay_min: int = 60
+    delay_max: int = 180
+
+    def reset(self):
+        self.step = "idle"
+        self.phone = ""
+        self.buffer = ""
+        if self.client:
+            asyncio.create_task(self.client.disconnect())
+        self.client = None
 
 user_states: Dict[int, UserState] = {}
 ad_tasks: Dict[int, asyncio.Task] = {}
-active_clients: Dict[str, TelegramClient] = {}
 
-# Lockfile for single instance enforcement
-PID_FILE = Path("/tmp/adimyze_pro_v15.pid")
-
-# ────────────────────────────────────────────────
-# UTILITY FUNCTIONS
-# ────────────────────────────────────────────────
-def acquire_lock() -> Optional[int]:
-    """Ensure only one instance runs using PID file lock."""
-    try:
-        fd = os.open(PID_FILE, os.O_CREAT | os.O_EXCL | os.O_RDWR)
-        os.write(fd, str(os.getpid()).encode())
-        os.close(fd)
-        return fd
-    except FileExistsError:
-        logger.error("Another instance is already running. Exiting.")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Lock acquisition failed: {e}")
-        sys.exit(1)
-
-def release_lock(fd: int):
-    """Release lock and remove PID file."""
-    try:
-        os.close(fd)
-        PID_FILE.unlink(missing_ok=True)
-    except Exception as e:
-        logger.warning(f"Lock release failed: {e}")
-
-def format_phone(phone: str) -> str:
-    """Format phone number for display."""
-    return f"+{phone[-10:]}" if len(phone) >= 10 else phone
-
-def get_session_hash(session_str: str) -> str:
-    """Generate unique hash for session string."""
-    return session_str[:15] if session_str else "unknown"
-
-async def safe_disconnect(client: TelegramClient):
-    """Safely disconnect Telethon client."""
-    try:
-        if client and client.is_connected():
-            await client.disconnect()
-    except Exception as e:
-        logger.debug(f"Client disconnect error: {e}")
-
-async def cleanup_user_state(user_id: int):
-    """Clean up user state and disconnect client."""
-    state = user_states.pop(user_id, None)
-    if state and state.client:
-        await safe_disconnect(state.client)
-    
-    # Clean up cached client if exists
-    if state and state.session_string:
-        session_hash = get_session_hash(state.session_string)
-        client = active_clients.pop(session_hash, None)
-        if client:
-            await safe_disconnect(client)
-
-def parse_callback_data(data: str) -> Tuple[str, List[str]]:
-    """Parse structured callback data: prefix|arg1|arg2..."""
-    parts = data.split('|')
-    return parts[0], parts[1:] if len(parts) > 1 else []
-
-async def is_sudo_user(user_id: int) -> bool:
-    """Check if user is a sudo user."""
-    if user_id in SUDO_USERS:
-        return True
-    
-    # Check in database
-    sudo_doc = await db.sudos.find_one({"user_id": user_id})
-    return sudo_doc is not None
-
-async def is_premium_user(user_id: int) -> bool:
-    """Check if user is a premium user."""
-    if user_id in PREMIUM_USERS:
-        return True
-    
-    # Check in database
-    premium_doc = await db.premium_users.find_one({"user_id": user_id})
-    return premium_doc is not None
-
-# ────────────────────────────────────────────────
-# GOLD UI THEME KEYBOARDS
-# ────────────────────────────────────────────────
-def kb_main_dashboard(user_id: int) -> InlineKeyboardMarkup:
-    """Main dashboard with 2x3 button layout (Gold Theme)"""
+# ───────────── KEYBOARDS ─────────────
+def kb_dashboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("👥 Account", callback_data="nav|accounts"),
-            InlineKeyboardButton("🎯 Targets", callback_data="nav|targets")
-        ],
-        [
-            InlineKeyboardButton("🚀 Start Ads (Ready)", callback_data="campaign|start"),
-            InlineKeyboardButton("🛑 Stop Ads", callback_data="campaign|stop")
-        ],
-        [
-            InlineKeyboardButton("👤 My Details", callback_data="nav|details"),
-            InlineKeyboardButton("🛠️ More Features", callback_data="nav|features")
-        ]
+        [InlineKeyboardButton("📱 Accounts", callback_data="nav|accounts"),
+         InlineKeyboardButton("🎯 Ads", callback_data="nav|ads")],
+        [InlineKeyboardButton("🚀 Start Ads", callback_data="campaign|start"),
+         InlineKeyboardButton("🛑 Stop Ads", callback_data="campaign|stop")],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="nav|settings"),
+         InlineKeyboardButton("👤 My Stats", callback_data="nav|stats")],
+        [InlineKeyboardButton("🆘 Help", url=SUPPORT_LINK),
+         InlineKeyboardButton("📢 Updates", url=UPDATE_CHANNEL)]
     ])
 
-def kb_accounts_menu() -> InlineKeyboardMarkup:
-    """Accounts menu with 3 options"""
+def kb_accounts() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Add Account", callback_data="account|add")],
         [InlineKeyboardButton("🗑️ Delete Account", callback_data="account|delete")],
-        [InlineKeyboardButton("⚙️ Manage Account", callback_data="account|manage")],
-        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="nav|home")]
+        [InlineKeyboardButton("🔙 Back", callback_data="nav|home")]
     ])
-
-def kb_targets_menu() -> InlineKeyboardMarkup:
-    """Targets menu with 4 options"""
+def kb_ads() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Add Target", callback_data="target|add")],
-        [InlineKeyboardButton("🗑️ Delete Target", callback_data="target|delete")],
-        [InlineKeyboardButton("🧹 Clear All", callback_data="target|clear")],
-        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="nav|home")]
+        [InlineKeyboardButton("🔄 Refresh Ad", callback_data="ad|refresh")],
+        [InlineKeyboardButton("🗑️ Delete Ad", callback_data="ad|delete")],
+        [InlineKeyboardButton("🧹 Delete All Ads", callback_data="ad|delete_all")],
+        [InlineKeyboardButton("🔙 Back", callback_data="nav|home")]
     ])
 
-def kb_features_menu() -> InlineKeyboardMarkup:
-    """More Features menu with 9 options"""
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🔄 Smart Rotate", callback_data="feature|smart_rotate"),
-            InlineKeyboardButton("⏱️ Delays", callback_data="feature|delays")
-        ],
-        [
-            InlineKeyboardButton("🔄 Cycle Interval", callback_data="feature|cycle_interval"),
-            InlineKeyboardButton("🌙 Auto Sleep", callback_data="feature|auto_sleep")
-        ],
-        [
-            InlineKeyboardButton("📊 Analytics", callback_data="feature|analytics"),
-            InlineKeyboardButton("🤖 Auto Join", callback_data="feature|auto_join")
-        ],
-        [
-            InlineKeyboardButton("💬 Auto Reply", callback_data="feature|auto_reply"),
-            InlineKeyboardButton("📢 Mass Broadcast", callback_data="feature|mass_broadcast")
-        ],
-        [InlineKeyboardButton("💎 Upgrade BoostX", callback_data="feature|upgrade_boostx")],
-        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="nav|home")]
-    ])
-
-def kb_otp_keyboard(user_id: int, step: str = "otp") -> InlineKeyboardMarkup:
-    """Gold-themed OTP/2FA keypad"""
+def kb_settings(user_id: int) -> InlineKeyboardMarkup:
     state = user_states.get(user_id)
-    buffer = state.buffer if state else ""
-    
-    if step == "2fa":
-        display = "•" * len(buffer) if buffer else "Enter password"
-        title = "🔐 Two-Factor Authentication"
-    else:
-        display = buffer.ljust(5, "●") if len(buffer) < 5 else buffer
-        title = f"🔑 Verification Code (5 digits)"
-    
-    keypad = [
-        [InlineKeyboardButton(display, callback_data="otp|display")],
-        [InlineKeyboardButton("1", callback_data="otp|1"),
-         InlineKeyboardButton("2", callback_data="otp|2"),
-         InlineKeyboardButton("3", callback_data="otp|3")],
-        [InlineKeyboardButton("4", callback_data="otp|4"),
-         InlineKeyboardButton("5", callback_data="otp|5"),
-         InlineKeyboardButton("6", callback_data="otp|6")],
-        [InlineKeyboardButton("7", callback_data="otp|7"),
-         InlineKeyboardButton("8", callback_data="otp|8"),
-         InlineKeyboardButton("9", callback_data="otp|9")],
-        [InlineKeyboardButton("⌫", callback_data="otp|back"),
-         InlineKeyboardButton("0", callback_data="otp|0"),
-         InlineKeyboardButton("✅", callback_data="otp|confirm")],
+    min_d = state.delay_min if state else 60
+    max_d = state.delay_max if state else 180
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"⏱️ Min Delay: {min_d}s", callback_data="delay|min")],
+        [InlineKeyboardButton(f"⏱️ Max Delay: {max_d}s", callback_data="delay|max")],
+        [InlineKeyboardButton("🔙 Back", callback_data="nav|home")]
+    ])
+
+def kb_otp(user_id: int) -> InlineKeyboardMarkup:
+    state = user_states.get(user_id)
+    if not state:
+        return kb_dashboard(user_id)
+    display = (state.buffer + "●" * (5 - len(state.buffer)))[:5]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(display, callback_data="noop")],
+        [InlineKeyboardButton("1", callback_data="otp|1"), InlineKeyboardButton("2", callback_data="otp|2"), InlineKeyboardButton("3", callback_data="otp|3")],
+        [InlineKeyboardButton("4", callback_data="otp|4"), InlineKeyboardButton("5", callback_data="otp|5"), InlineKeyboardButton("6", callback_data="otp|6")],
+        [InlineKeyboardButton("7", callback_data="otp|7"), InlineKeyboardButton("8", callback_data="otp|8"), InlineKeyboardButton("9", callback_data="otp|9")],
+        [InlineKeyboardButton("⌫", callback_data="otp|back"), InlineKeyboardButton("0", callback_data="otp|0"), InlineKeyboardButton("✅", callback_data="otp|submit")],
         [InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")]
-    ]
-    
-    return InlineKeyboardMarkup(keypad)
-
-def kb_confirm_delete(account_id: str) -> InlineKeyboardMarkup:
-    """Deletion confirmation with safety emphasis."""
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ YES, Delete Permanently", callback_data=f"account|confirm_delete|{account_id}")],
-        [InlineKeyboardButton("❌ NO, Keep Account", callback_data=f"account|details|{account_id}")],
     ])
 
-def kb_delay_settings(user_id: int) -> InlineKeyboardMarkup:
-    """Delay configuration interface"""
-    state = user_states.get(user_id)
-    delay_config = state.delay_config if state else {"min": 60, "max": 180}
-    
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"Min Delay: {delay_config['min']}s", callback_data="delay|min")],
-        [InlineKeyboardButton(f"Max Delay: {delay_config['max']}s", callback_data="delay|max")],
-        [InlineKeyboardButton("🔙 Back", callback_data="nav|features")]
-    ])
-
-# ────────────────────────────────────────────────
-# MESSAGE TEMPLATES (GOLD THEME)
-# ────────────────────────────────────────────────
-WELCOME_TEXT = """
-👑 <b>ADIMYZE PRO v15</b> 👑
+# ───────────── TEMPLATES ─────────────
+DASHBOARD_CAPTION = """
+👑 <b>Adimyze Pro Dashboard</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
-<b>Professional Telegram Marketing Automation</b>
+<b>Your marketing command center.</b>
 
-✨ <b>Key Features:</b>
-• ✅ Multi-Account Management
-• ✅ Smart Anti-Flood Protection
-• ✅ Bulk Forwarding (Text/Media/Files)
-• ✅ Target Chat Discovery
-• ✅ Real-Time Analytics
-• ✅ Custom Delay Settings
-• ✅ Secure Session Management
+✨ Features:
+• Auto-use latest Saved Message as ad  
+• Multi-Account Broadcasting  
+• Custom Delays (Min/Max)  
+• Real-Time Stats  
 
-🛡️ <b>Safety Features:</b>
-• Built-in flood protection
-• Telegram TOS compliant
-• Rate limiting enforcement
-• Session encryption
+🛡️ Safe • Compliant • Professional
 
-👨‍💻 <b>Developed by:</b> <a href="https://t.me/nexaxoders">NexaXoders</a>
-📅 <b>Version:</b> 15.0 (Gold Edition)
+👨‍💻 Developed by @nexaxoders
 """
-
-DASHBOARD_TEMPLATE = """
-👑 <b>DASHBOARD</b>
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📱 <b>Accounts:</b> {account_count} active / {total_accounts} total
-💬 <b>Target Chats:</b> {chat_count}
-📢 <b>Ad Message:</b> {ad_status}
-⏱️ <b>Delay Settings:</b> {delay_range}
-⚡ <b>Campaign:</b> {campaign_status}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📈 <b>Lifetime Stats:</b>
-✅ Sent: {sent} | ❌ Failed: {failed}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-
-ACCOUNT_DETAILS_TEMPLATE = """
-📱 <b>Account Details</b>
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📞 Phone: <code>{phone}</code>
-🆔 Account ID: <code>{account_id}</code>
-⚡ Status: {status_emoji} <b>{status_text}</b>
-📅 Added: {created_date}
-👤 Username: {username}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-
-CAMPAIGN_RUNNING = """
-🟢 <b>CAMPAIGN ACTIVE</b>
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📊 <b>Current Status:</b>
-✅ Sent: {sent}
-❌ Failed: {failed}
-⏱️ Next batch in: ~{next_delay} seconds
-
-📱 <b>Active Accounts:</b> {account_count}
-💬 <b>Target Chats:</b> {chat_count}
-⏱️ <b>Delay Range:</b> {delay_range}
-
-⚠️ Campaign running. Use /status to check progress.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-
-# ────────────────────────────────────────────────
-# TELETHON CLIENT MANAGEMENT
-# ────────────────────────────────────────────────
-async def get_cached_client(session_str: str) -> TelegramClient:
-    """Get or create cached Telethon client."""
-    session_hash = get_session_hash(session_str)
-    if session_hash in active_clients:
-        client = active_clients[session_hash]
-        if client.is_connected():
-            try:
-                await client.get_me()
-                return client
-            except (AuthKeyUnregisteredError, SessionRevokedError, UserDeactivatedError):
-                await safe_disconnect(client)
-                active_clients.pop(session_hash, None)
-    
-    client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
-    await client.connect()
-    active_clients[session_hash] = client
-    return client
-
-async def validate_session(session_str: str) -> Tuple[bool, str]:
-    """Validate session string."""
+async def send_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE, edit=False):
+    user_id = update.effective_user.id
+    # Use a public dashboard image (replace with your own)
+    photo_url = "https://telegra.ph/file/8a7f7e5c1a3b4e9d8f0a1.jpg"
     try:
-        client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
-        await client.connect()
-        if await client.is_user_authorized():
-            me = await client.get_me()
-            phone = me.phone if me.phone else "unknown"
-            await safe_disconnect(client)
-            return True, phone
-        await safe_disconnect(client)
-        return False, "unauthorized"
-    except Exception as e:
-        logger.error(f"Session validation error: {e}")
-        return False, str(e)
+        if edit and update.callback_query:
+            await update.callback_query.edit_message_media(
+                InputMediaPhoto(photo_url, caption=DASHBOARD_CAPTION, parse_mode=ParseMode.HTML),
+                reply_markup=kb_dashboard(user_id)
+            )
+        else:
+            await update.message.reply_photo(photo_url, caption=DASHBOARD_CAPTION, reply_markup=kb_dashboard(user_id), parse_mode=ParseMode.HTML)
+    except BadRequest:
+        text = DASHBOARD_CAPTION
+        if edit and update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=kb_dashboard(user_id), parse_mode=ParseMode.HTML)
+        else:
+            await update.message.reply_text(text, reply_markup=kb_dashboard(user_id), parse_mode=ParseMode.HTML)
 
-# ────────────────────────────────────────────────
-# HANDLERS
-# ────────────────────────────────────────────────
+# ───────────── FETCH LATEST SAVED MESSAGE ─────────────
+async def fetch_latest_saved_message(client: TelegramClient):
+    """Fetch the latest message from 'me' (Saved Messages)"""
+    async for msg in client.iter_messages("me", limit=1):
+        if msg.text or msg.media:
+            return {"chat_id": "me", "msg_id": msg.id, "has_media": bool(msg.media)}
+    return None
+
+# ───────────── HANDLERS ─────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Gold-themed welcome message."""
-    await update.message.reply_text(
-        WELCOME_TEXT,
-        reply_markup=kb_main_dashboard(update.effective_user.id),
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True
-    )
-
-async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Clear user state."""
     user_id = update.effective_user.id
-    await cleanup_user_state(user_id)
-    await update.message.reply_text(
-        "✅ User state cleared.",
-        reply_markup=kb_main_dashboard(user_id)
-    )
-
-async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show campaign status."""
-    user_id = update.effective_user.id
-    user_doc = await db.users.find_one({"user_id": user_id})
-    
-    if not user_doc or not user_doc.get("running"):
-        await update.message.reply_text(
-            "⏹️ No active campaign.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        return
-    
-    stats = user_doc.get("stats", [])[-1] if user_doc.get("stats") else {}
     state = user_states.get(user_id)
-    delay_config = state.delay_config if state else {"min": 60, "max": 180}
-    
-    await update.message.reply_text(
-        CAMPAIGN_RUNNING.format(
-            sent=stats.get("sent", 0),
-            failed=stats.get("failed", 0),
-            next_delay=random.randint(delay_config['min'], delay_config['max']),
-            account_count=await db.accounts.count_documents({"user_id": user_id, "active": True}),
-            chat_count=len(user_doc.get("chats", [])),
-            delay_range=f"{delay_config['min']}-{delay_config['max']}s"
-        ),
-        reply_markup=kb_main_dashboard(user_id),
-        parse_mode=ParseMode.HTML
-    )
+    if state:
+        state.reset()
+    await send_dashboard(update, context)
 
-async def cmd_listsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List sudo users."""
-    user_id = update.effective_user.id
-    
-    if user_id not in SUDO_USERS:
-        await update.message.reply_text(
-            "❌ You don't have permission to use this command.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        return
-    
-    sudo_users = SUDO_USERS.copy()
-    sudo_docs = await db.sudos.find().to_list(100)
-    for doc in sudo_docs:
-        if doc["user_id"] not in sudo_users:
-            sudo_users.append(doc["user_id"])
-    
-    if not sudo_users:
-        await update.message.reply_text(
-            "👤 No sudo users configured.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        return
-    
-    sudo_list = "\n".join([
-        f"• {user_id} - {await get_username(user_id)}"
-        for user_id in sudo_users
-    ])
-    
-    await update.message.reply_text(
-        f"👑 <b>SUDO USERS</b> 👑\n\n"
-        f"Total: {len(sudo_users)}\n\n"
-        f"{sudo_list}",
-        reply_markup=kb_main_dashboard(user_id),
-        parse_mode=ParseMode.HTML
-    )
-
-async def cmd_rmbasudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Remove a user from sudo."""
-    user_id = update.effective_user.id
-    
-    if user_id not in SUDO_USERS:
-        await update.message.reply_text(
-            "❌ You don't have permission to use this command.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text(
-            "❌ Please provide a user ID to remove from sudo.\n"
-            "Example: /rmbasudo 123456789",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        return
-    
-    try:
-        target_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text(
-            "❌ Invalid user ID format.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        return
-    
-    if target_id == user_id:
-        await update.message.reply_text(
-            "❌ You cannot remove yourself from sudo.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        return
-    
-    if target_id in SUDO_USERS:
-        SUDO_USERS.remove(target_id)
-        await db.sudos.delete_one({"user_id": target_id})
-        await update.message.reply_text(
-            f"✅ User {target_id} removed from sudo.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        return
-    
-    result = await db.sudos.delete_one({"user_id": target_id})
-    if result.deleted_count > 0:
-        await update.message.reply_text(
-            f"✅ User {target_id} removed from sudo.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-    else:
-        await update.message.reply_text(
-            f"❌ User {target_id} is not a sudo user.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-
-async def get_username(user_id: int) -> str:
-    """Get username for a user ID."""
-    try:
-        user = await context.bot.get_chat(user_id)
-        return f"@{user.username}" if user.username else f"User {user_id}"
-    except Exception:
-        return f"User {user_id}"
-
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Main callback router."""
+async def handle_nav(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    data = query.data
-    
-    if not data:
-        return
-    
-    prefix, args = parse_callback_data(data)
-    
-    try:
-        if prefix == "nav":
-            await handle_navigation(query, user_id, args[0] if args else "home")
-        elif prefix == "account":
-            await handle_account_actions(query, user_id, args)
-        elif prefix == "target":
-            await handle_target_actions(query, user_id, args)
-        elif prefix == "campaign":
-            await handle_campaign_actions(query, user_id, args[0] if args else "start")
-        elif prefix == "feature":
-            await handle_feature_actions(query, user_id, args)
-        elif prefix == "delay":
-            await handle_delay_settings(query, user_id, args[0] if args else "")
-        elif prefix == "otp":
-            await handle_otp_input(query, user_id, args[0] if args else "cancel")
-        else:
-            await query.edit_message_text(
-                "❓ Unknown action.",
-                reply_markup=kb_main_dashboard(user_id)
-            )
-    except BadRequest as e:
-        logger.warning(f"BadRequest: {e}")
-        await query.edit_message_text(
-            "⚠️ Interface updated. Please use menu buttons.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-    except Exception as e:
-        logger.exception(f"Callback error for {user_id}: {e}")
-        await query.edit_message_text(
-            "❌ Error occurred.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
+    _, target = query.data.split("|", 1)
 
-async def handle_navigation(query, user_id: int, target: str):
-    """Handle navigation."""
     if target == "home":
-        account_count = await db.accounts.count_documents({"user_id": user_id, "active": True})
-        total_accounts = await db.accounts.count_documents({"user_id": user_id})
-        user_doc = await db.users.find_one({"user_id": user_id}) or {}
-        chat_count = len(user_doc.get("chats", []))
-        ad_status = "✅ Configured" if user_doc.get("ad_message") else "❌ Not set"
-        campaign_status = "🟢 RUNNING" if user_doc.get("running") else "🔴 STOPPED"
-        
-        state = user_states.get(user_id)
-        delay_config = state.delay_config if state else {"min": 60, "max": 180}
-        delay_range = f"{delay_config['min']}-{delay_config['max']}s"
-        
-        stats = {
-            "sent": sum(s.get("sent", 0) for s in user_doc.get("stats", [])),
-            "failed": sum(s.get("failed", 0) for s in user_doc.get("stats", [])),
-            "running": user_doc.get("running", False)
-        }
-        
-        await query.edit_message_text(
-            DASHBOARD_TEMPLATE.format(
-                account_count=account_count,
-                total_accounts=total_accounts,
-                chat_count=chat_count,
-                ad_status=ad_status,
-                delay_range=delay_range,
-                campaign_status=campaign_status,
-                sent=stats["sent"],
-                failed=stats["failed"]
-            ),
-            reply_markup=kb_main_dashboard(user_id),
-            parse_mode=ParseMode.HTML
-        )
+        await send_dashboard(update, context, edit=True)
     elif target == "accounts":
+        await query.edit_message_text("📱 <b>Account Management</b>", reply_markup=kb_accounts(), parse_mode=ParseMode.HTML)
+    elif target == "ads":
+        ad_count = await db.ads.count_documents({"user_id": str(user_id)})
+        status = f"✅ {ad_count} ads saved" if ad_count else "❌ No ad saved"
+        await query.edit_message_text(f"🎯 <b>Ad Management</b>\n\nStatus: {status}", reply_markup=kb_ads(), parse_mode=ParseMode.HTML)
+    elif target == "settings":        await query.edit_message_text("⚙️ <b>Settings</b>", reply_markup=kb_settings(user_id), parse_mode=ParseMode.HTML)
+    elif target == "stats":
+        acc_count = await db.accounts.count_documents({"user_id": user_id})
+        ad_count = await db.ads.count_documents({"user_id": str(user_id)})
         await query.edit_message_text(
-            "📱 <b>Account Management</b>\n\n"
-            "Manage your marketing accounts here:",
-            reply_markup=kb_accounts_menu(),
-            parse_mode=ParseMode.HTML
-        )
-    elif target == "targets":
-        await query.edit_message_text(
-            "🎯 <b>Target Management</b>\n\n"
-            "Configure your target groups and channels:",
-            reply_markup=kb_targets_menu(),
-            parse_mode=ParseMode.HTML
-        )
-    elif target == "details":
-        user_doc = await db.users.find_one({"user_id": user_id}) or {}
-        account_count = await db.accounts.count_documents({"user_id": user_id, "active": True})
-        total_accounts = await db.accounts.count_documents({"user_id": user_id})
-        chat_count = len(user_doc.get("chats", []))
-        ad_status = "✅ Configured" if user_doc.get("ad_message") else "❌ Not set"
-        campaign_status = "🟢 RUNNING" if user_doc.get("running") else "🔴 STOPPED"
-        
-        stats = {
-            "sent": sum(s.get("sent", 0) for s in user_doc.get("stats", [])),
-            "failed": sum(s.get("failed", 0) for s in user_doc.get("stats", [])),
-            "running": user_doc.get("running", False)
-        }
-        
-        await query.edit_message_text(
-            DASHBOARD_TEMPLATE.format(
-                account_count=account_count,
-                total_accounts=total_accounts,
-                chat_count=chat_count,
-                ad_status=ad_status,
-                delay_range="N/A",
-                campaign_status=campaign_status,
-                sent=stats["sent"],
-                failed=stats["failed"]
-            ),
-            reply_markup=kb_main_dashboard(user_id),
-            parse_mode=ParseMode.HTML
-        )
-    elif target == "features":
-        await query.edit_message_text(
-            "🛠️ <b>More Features</b>\n\n"
-            "Advanced tools for professional marketing:",
-            reply_markup=kb_features_menu(),
+            f"👤 <b>Your Stats</b>\n\n"
+            f"📱 Accounts: {acc_count}\n"
+            f"📢 Ads: {ad_count}\n"
+            f"⚡ Campaign: {'🟢 Running' if user_id in ad_tasks else '🔴 Stopped'}",
+            reply_markup=kb_dashboard(user_id),
             parse_mode=ParseMode.HTML
         )
 
-async def handle_account_actions(query, user_id: int, args: List[str]):
-    """Handle account actions."""
-    if not args:
-        return
-    
-    action = args[0]
-    
+async def handle_account_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    _, action = query.data.split("|", 1)
+
     if action == "add":
         user_states[user_id] = UserState(step="phone")
         await query.edit_message_text(
-            "📱 <b>Add New Account</b>\n\n"
-            "Please send your phone number in international format:\n"
-            "<code>+12025550123</code> or <code>+447911123456</code>\n\n"
-            "⚠️ Use a dedicated account for marketing.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back", callback_data="nav|accounts")]
-            ]),
+            "📲 Send your phone number in international format:\n<code>+1234567890</code>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")]]),
             parse_mode=ParseMode.HTML
         )
-    
-    elif action == "delete":
-        accounts = await db.accounts.find({"user_id": user_id}).to_list(50)
-        if not accounts:
-            await query.edit_message_text(
-                "📱 <b>Account Management</b>\n\n"
-                "No accounts added yet.\n\n"
-                "➕ Add your first account:",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("➕ Add Account", callback_data="account|add")],
-                    [InlineKeyboardButton("🔙 Back", callback_data="nav|accounts")]
-                ]),
-                parse_mode=ParseMode.HTML
-            )
-            return
-        
-        await query.edit_message_text(
-            "📱 <b>Account Management</b>\n\n"
-            f"Total: {len(accounts)} | Active: {sum(1 for a in accounts if a.get('active', True))}\n\n"
-            "Select an account to delete:",
-            reply_markup=kb_accounts_list(accounts, 0),
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif action == "manage":
-        accounts = await db.accounts.find({"user_id": user_id}).to_list(50)
-        if not accounts:
-            await query.edit_message_text(
-                "📱 <b>Account Management</b>\n\n"
-                "No accounts added yet.\n\n"
-                "➕ Add your first account:",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("➕ Add Account", callback_data="account|add")],
-                    [InlineKeyboardButton("🔙 Back", callback_data="nav|accounts")]
-                ]),
-                parse_mode=ParseMode.HTML
-            )
-            return
-        
-        await query.edit_message_text(
-            "📱 <b>Account Management</b>\n\n"
-            f"Total: {len(accounts)} | Active: {sum(1 for a in accounts if a.get('active', True))}\n\n"
-            "Select an account to manage:",
-            reply_markup=kb_accounts_list(accounts, 0),
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif action == "details" and len(args) > 1:
-        account_id = args[1]
-        account = await db.accounts.find_one({"_id": account_id, "user_id": user_id})
-        if not account:
-            await query.answer("❌ Account not found!", show_alert=True)
-            return
-        
-        is_valid, _ = await validate_session(account["session"])
-        if not is_valid:
-            await db.accounts.update_one(
-                {"_id": account_id},
-                {"$set": {"active": False, "invalidated": True}}
-            )
-            await query.answer("⚠️ Session expired. Account deactivated.", show_alert=True)
-            await handle_account_actions(query, user_id, ["manage"])
-            return
-        
-        status_emoji = "🟢" if account.get("active", True) else "🔴"
-        status_text = "Active" if account.get("active", True) else "Inactive"
-        created_date = account.get("created", datetime.now()).strftime("%Y-%m-%d")
-        username = account.get("username", "Not set")
-        
-        await query.edit_message_text(
-            ACCOUNT_DETAILS_TEMPLATE.format(
-                phone=format_phone(account.get("phone", "Unknown")),
-                account_id=account_id,
-                status_emoji=status_emoji,
-                status_text=status_text,
-                created_date=created_date,
-                username=f"@{username}" if username else "Not set"
-            ),
-            reply_markup=kb_account_actions(account_id, account.get("active", True)),
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif action == "toggle" and len(args) > 1:
-        account_id = args[1]
-        account = await db.accounts.find_one({"_id": account_id, "user_id": user_id})
-        if not account:
-            await query.answer("❌ Account not found!", show_alert=True)
-            return
-        
-        new_status = not account.get("active", True)
-        await db.accounts.update_one(
-            {"_id": account_id},
-            {"$set": {"active": new_status}}
-        )
-        status_text = "activated" if new_status else "deactivated"
-        await query.answer(f"✅ Account {status_text}!")
-        await handle_account_actions(query, user_id, ["details", account_id])
-    
-    elif action == "delete" and len(args) > 1:
-        account_id = args[1]
-        account = await db.accounts.find_one({"_id": account_id, "user_id": user_id})
-        if not account:
-            await query.answer("❌ Account not found!", show_alert=True)
-            return
-        
-        await query.edit_message_text(
-            f"⚠️ <b>Delete Account</b>\n\n"
-            f"Phone: <code>{format_phone(account.get('phone', 'Unknown'))}</code>\n\n"
-            f"❗ This will PERMANENTLY remove the account.\n"
-            f"❗ All data will be lost.\n\n"
-            f"Are you sure?",
-            reply_markup=kb_confirm_delete(account_id),
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif action == "confirm_delete" and len(args) > 1:
-        account_id = args[1]
-        result = await db.accounts.delete_one({"_id": account_id, "user_id": user_id})
-        if result.deleted_count == 0:
-            await query.answer("❌ Deletion failed!", show_alert=True)
-            await handle_account_actions(query, user_id, ["manage"])
-            return
-        
-        account = await db.accounts.find_one({"_id": account_id})
-        if account and account.get("session"):
-            session_hash = get_session_hash(account["session"])
-            client = active_clients.pop(session_hash, None)
-            if client:
-                await safe_disconnect(client)
-        
-        await query.answer("✅ Account deleted!")
-        await handle_account_actions(query, user_id, ["manage"])
+    else:
+        await query.edit_message_text("🗑️ Account deletion coming soon...", reply_markup=kb_accounts())
 
-async def handle_target_actions(query, user_id: int, args: List[str]):
-    """Handle target actions."""
-    if not args:
-        return
-    
-    action = args[0]
-    
-    if action == "add":
-        await query.edit_message_text(
-            "🎯 <b>Add Target Group/Channel</b>\n\n"
-            "Please forward a message from the target group/channel:\n\n"
-            "✅ Supported:\n"
-            "• Groups you can post in\n"
-            "• Channels you admin\n"
-            "• Large communities (>50 members)\n\n"
-            "⚠️ Only from groups you have access to!",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back", callback_data="nav|targets")]
-            ]),
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif action == "delete":
-        user_doc = await db.users.find_one({"user_id": user_id}) or {}
-        chats = user_doc.get("chats", [])
-        
-        if not chats:
-            await query.edit_message_text(
-                "🎯 <b>Target Management</b>\n\n"
-                "No targets added yet.\n\n"
-                "➕ Add your first target:",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("➕ Add Target", callback_data="target|add")],
-                    [InlineKeyboardButton("🔙 Back", callback_data="nav|targets")]
-                ]),
-                parse_mode=ParseMode.HTML
-            )
-            return
-        
-        # Create list of targets for deletion
-        target_list = []
-        for idx, chat in enumerate(chats[:20]):
-            title = chat.get("title", "Unknown")
-            members = chat.get("members", 0)
-            target_list.append(
-                InlineKeyboardButton(
-                    f"{title} ({members} members)",
-                    callback_data=f"target|delete|{idx}"
-                )
-            )
-        
-        await query.edit_message_text(
-            "🎯 <b>Delete Target</b>\n\n"
-            "Select a target to delete:",
-            reply_markup=InlineKeyboardMarkup([
-                [button] for button in target_list
-            ] + [
-                [InlineKeyboardButton("🔙 Back", callback_data="nav|targets")]
-            ]),
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif action == "clear":
-        await query.edit_message_text(
-            "⚠️ <b>Clear All Targets</b>\n\n"
-            "Are you sure you want to clear all target groups/channels?\n\n"
-            "❗ This action cannot be undone.\n\n"
-            "All target data will be permanently deleted.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ YES, Clear All", callback_data="target|confirm_clear")],
-                [InlineKeyboardButton("❌ NO, Cancel", callback_data="nav|targets")]
-            ]),
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif action == "confirm_clear":
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {"chats": []}}
-        )
-        await query.answer("✅ All targets cleared!")
-        await handle_target_actions(query, user_id, ["add"])
+async def handle_ad_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    _, action = query.data.split("|", 1)
 
-async def handle_campaign_actions(query, user_id: int, action: str):
-    """Handle campaign start/stop."""
-    user_doc = await db.users.find_one({"user_id": user_id}) or {}
-    
-    if action == "start":
-        if not user_doc.get("ad_message"):
-            await query.answer("❌ Ad message not set!", show_alert=True)
-            return
-        if not user_doc.get("chats"):
-            await query.answer("❌ No target chats!", show_alert=True)
-            return
-        
-        active_accounts = await db.accounts.count_documents({
-            "user_id": user_id,
-            "active": True
-        })
-        if active_accounts == 0:
+    if action == "refresh":
+        accounts = await db.accounts.find({"user_id": user_id, "active": True}).to_list(None)
+        if not accounts:
             await query.answer("❌ No active accounts!", show_alert=True)
             return
-        
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {"running": True, "started_at": datetime.now(timezone.utc)}},
-            upsert=True
-        )
-        
-        if user_id in ad_tasks and not ad_tasks[user_id].done():
-            ad_tasks[user_id].cancel()
-        
-        task = asyncio.create_task(run_campaign(user_id))
-        ad_tasks[user_id] = task
-        
-        state = user_states.get(user_id)
-        delay_config = state.delay_config if state else {"min": 60, "max": 180}
-        
-        await query.edit_message_text(
-            "🚀 <b>Campaign Started!</b>\n\n"
-            f"📱 Active Accounts: {active_accounts}\n"
-            f"💬 Target Chats: {len(user_doc.get('chats', []))}\n"
-            f"⏱️ Delay Range: {delay_config['min']}-{delay_config['max']}s\n"
-            f"⏱️ First batch in: ~{delay_config['min']} seconds\n\n"
-            "📊 Use /status to check progress",
-            reply_markup=kb_main_dashboard(user_id),
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif action == "stop":
-        if user_id in ad_tasks and not ad_tasks[user_id].done():
-            ad_tasks[user_id].cancel()
-            del ad_tasks[user_id]
-        
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {"running": False, "stopped_at": datetime.now(timezone.utc)}}
-        )
-        
-        await query.edit_message_text(
-            "⏹️ <b>Campaign Stopped</b>\n\n"
-            "All tasks terminated.\n"
-            "Accounts are safe.",
-            reply_markup=kb_main_dashboard(user_id),
-            parse_mode=ParseMode.HTML
-        )
 
-async def handle_feature_actions(query, user_id: int, args: List[str]):
-    """Handle feature actions."""
-    if not args:
-        return
-    
-    action = args[0]
-    
-    if action == "smart_rotate":
-        state = user_states.get(user_id)
-        if not state:
-            state = UserState()
-            user_states[user_id] = state
-        
-        state.campaign_settings["smart_rotate"] = not state.campaign_settings["smart_rotate"]
-        status = "ENABLED" if state.campaign_settings["smart_rotate"] else "DISABLED"
-        await query.answer(f"🔄 Smart Rotate {status}!")
-        await handle_feature_actions(query, user_id, ["add"])
-    
-    elif action == "delays":
-        if user_id not in user_states:
-            user_states[user_id] = UserState()
-        
-        await query.edit_message_text(
-            "⏱️ <b>Delay Configuration</b>\n\n"
-            "Configure delays between message sends.\n\n"
-            "⚠️ Lower delays = faster but riskier\n"
-            "⚠️ Higher delays = safer but slower",
-            reply_markup=kb_delay_settings(user_id),
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif action == "auto_sleep":
-        state = user_states.get(user_id)
-        if not state:
-            state = UserState()
-            user_states[user_id] = state
-        
-        state.campaign_settings["auto_sleep"] = not state.campaign_settings["auto_sleep"]
-        status = "ENABLED" if state.campaign_settings["auto_sleep"] else "DISABLED"
-        await query.answer(f"🌙 Auto Sleep {status}!")
-        await handle_feature_actions(query, user_id, ["add"])
-    
-    elif action == "auto_join":
-        state = user_states.get(user_id)
-        if not state:
-            state = UserState()
-            user_states[user_id] = state
-        
-        state.campaign_settings["auto_join"] = not state.campaign_settings["auto_join"]
-        status = "ENABLED" if state.campaign_settings["auto_join"] else "DISABLED"
-        await query.answer(f"🤖 Auto Join {status}!")
-        await handle_feature_actions(query, user_id, ["add"])
-    
-    elif action == "auto_reply":
-        state = user_states.get(user_id)
-        if not state:
-            state = UserState()
-            user_states[user_id] = state
-        
-        state.campaign_settings["auto_reply"] = not state.campaign_settings["auto_reply"]
-        status = "ENABLED" if state.campaign_settings["auto_reply"] else "DISABLED"
-        await query.answer(f"💬 Auto Reply {status}!")
-        await handle_feature_actions(query, user_id, ["add"])
-    
-    elif action == "mass_broadcast":
-        await query.edit_message_text(
-            "📢 <b>Mass Broadcast</b>\n\n"
-            "This feature allows you to send a message to all your target groups.\n\n"
-            "👉 <b>Forward ONE message</b> from your <u>Saved Messages</u>\n\n"
-            "✅ Supported:\n"
-            "• Text messages\n"
-            "• Photos & captions\n"
-            "• Videos & documents\n"
-            "• Voice messages\n\n"
-            "⚠️ Only from <b>your own Saved Messages</b>!",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back", callback_data="nav|features")]
-            ]),
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif action == "upgrade_boostx":
-        await query.edit_message_text(
-            "💎 <b>Upgrade BoostX</b>\n\n"
-            "Unlock premium features for your account:\n\n"
-            "✨ <b>Features:</b>\n"
-            "• 10x faster message sending\n"
-            "• Unlimited accounts\n"
-            "• Advanced analytics\n"
-            "• Priority support\n"
-            "• Smart AI targeting\n\n"
-            "💰 <b>Price:</b> $29.99/month\n\n"
-            "Contact @nexaxoders for upgrade details.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Contact Support", url=SUPPORT_GROUP)],
-                [InlineKeyboardButton("🔙 Back", callback_data="nav|features")]
-            ]),
-            parse_mode=ParseMode.HTML
-        )
+        # Use first account to fetch latest Saved Message
+        session = accounts[0]["session"]
+        client = TelegramClient(StringSession(session), API_ID, API_HASH)
+        try:
+            await client.connect()
+            ad_data = await fetch_latest_saved_message(client)
+            await client.disconnect()
 
-async def handle_delay_settings(query, user_id: int, action: str):
-    """Handle delay settings."""
-    if user_id not in user_states:
-        user_states[user_id] = UserState()
-    
-    state = user_states[user_id]
-    
-    if action == "min":
-        await query.edit_message_text(
-            "⏱️ <b>Set Minimum Delay</b>\n\n"
-            "Send a number (in seconds):\n"
-            "Recommended: 60-300\n\n"
-            "Example: <code>60</code>",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back", callback_data="nav|features")]
-            ]),
-            parse_mode=ParseMode.HTML
-        )
-        state.step = "set_min_delay"
-    elif action == "max":
-        await query.edit_message_text(
-            "⏱️ <b>Set Maximum Delay</b>\n\n"
-            "Send a number (in seconds):\n"
-            "Recommended: 180-600\n\n"
-            "Example: <code>180</code>",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back", callback_data="nav|features")]
-            ]),
-            parse_mode=ParseMode.HTML
-        )
-        state.step = "set_max_delay"
+            if ad_data:                await db.ads.update_one(
+                    {"user_id": str(user_id)},
+                    {"$set": {**ad_data, "updated_at": datetime.now(timezone.utc)}},
+                    upsert=True
+                )
+                await query.answer("✅ Ad refreshed from Saved Messages!", show_alert=True)
+            else:
+                await query.answer("❌ No message found in Saved Messages!", show_alert=True)
+        except Exception as e:
+            logger.error(f"Ad refresh error: {e}")
+            await query.answer("❌ Failed to fetch ad!", show_alert=True)
 
-async def handle_otp_input(query, user_id: int, action: str):
-    """Handle OTP/2FA input."""
-    state = user_states.get(user_id)
-    if not state or state.step not in ["otp", "2fa"]:
-        await query.edit_message_text(
-            "⚠️ Session expired. Restart login.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        await cleanup_user_state(user_id)
-        return
-    
-    if action == "cancel":
-        await cleanup_user_state(user_id)
-        await query.edit_message_text(
-            "❌ Cancelled.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        return
-    elif action == "back":
-        state.buffer = state.buffer[:-1] if state.buffer else ""
-    elif action == "confirm":
-        await verify_code(user_id, query, state)
-        return
-    elif action.isdigit() and len(action) == 1:
-        max_len = 5 if state.step == "otp" else 32
-        if len(state.buffer) < max_len:
-            state.buffer += action
-    
-    step = state.step
+    elif action == "delete":
+        result = await db.ads.delete_one({"user_id": str(user_id)})
+        msg = "✅ Ad deleted." if result.deleted_count else "❌ No ad to delete."
+        await query.answer(msg, show_alert=True)
+        await handle_nav(update, context)  # Refresh
+
+    elif action == "delete_all":
+        result = await db.ads.delete_many({"user_id": str(user_id)})
+        await query.answer(f"🧹 Deleted {result.deleted_count} ads.", show_alert=True)
+        await handle_nav(update, context)
+
+async def handle_delay(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    _, which = query.data.split("|", 1)
+
+    state = user_states.setdefault(user_id, UserState())
+    state.step = f"set_{which}_delay"
+    current = state.delay_min if which == "min" else state.delay_max
     await query.edit_message_text(
-        f"{'🔐 Two-Factor Authentication' if step == '2fa' else '🔑 Verification Code'}\n\n"
-        f"Enter the code:",
-        reply_markup=kb_otp_keyboard(user_id, step),
-        parse_mode=ParseMode.HTML
+        f"⏱️ Send new {which} delay (seconds):\nCurrent: {current}",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="nav|settings")]])
     )
 
-async def verify_code(user_id: int, query, state: UserState):
-    """Verify OTP or 2FA code."""
-    code = state.buffer
-    client = state.client
-    
-    if not client or not client.is_connected():
-        await query.edit_message_text(
-            "❌ Connection lost. Restart login.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        await cleanup_user_state(user_id)
+async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    state = user_states.get(user_id)
+    if not state or state.step != "phone":
         return
-    
+
+    raw = re.sub(r"\D", "", update.message.text)
+    if len(raw) < 10:
+        await update.message.reply_text("❌ Invalid number.")
+        return
+
+    phone = "+" + raw if not raw.startswith("+") else raw
+    try:        client = TelegramClient(StringSession(), API_ID, API_HASH)
+        await client.connect()
+        sent = await client.send_code_request(phone)
+
+        state.phone = phone
+        state.client = client
+        state.phone_code_hash = sent.phone_code_hash
+        state.step = "code"
+
+        await update.message.reply_text(
+            f"🔑 Code sent to {phone[-10:]}. Use keypad:",
+            reply_markup=kb_otp(user_id)
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+        if state:
+            state.reset()
+
+async def handle_delay_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    state = user_states.get(user_id)
+    if not state or "delay" not in state.step:
+        return
+
     try:
-        if state.step == "otp":
-            await client.sign_in(
-                phone=state.phone,
-                code=code,
-                phone_code_hash=state.phone_code_hash
+        value = int(update.message.text.strip())
+        if value < 10 or value > 3600:
+            raise ValueError
+        if state.step == "set_min_delay":
+            state.delay_min = value
+        else:
+            state.delay_max = value
+        await update.message.reply_text(f"✅ Delay updated to {value}s.", reply_markup=kb_settings(user_id))
+        state.step = "idle"
+    except ValueError:
+        await update.message.reply_text("❌ Enter a number between 10–3600.")
+
+async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    state = user_states.get(user_id)
+    if not state or state.step != "code":
+        await query.edit_message_text("⚠️ Expired. Use /start.", reply_markup=kb_dashboard(user_id))
+        return
+
+    _, action = query.data.split("|", 1)
+    if action == "cancel":
+        state.reset()
+        await send_dashboard(update, context, edit=True)        return
+    elif action == "back":
+        state.buffer = state.buffer[:-1]
+    elif action.isdigit() and len(state.buffer) < 5:
+        state.buffer += action
+        if len(state.buffer) == 5:
+            await finalize_login(user_id, query, state)
+            return
+    elif action == "submit":
+        if len(state.buffer) != 5:
+            await query.answer("❗ Enter all 5 digits!", show_alert=True)
+            return
+        await finalize_login(user_id, query, state)
+        return
+
+    display = (state.buffer + "●" * (5 - len(state.buffer)))[:5]
+    await query.edit_message_text(f"🔑 Code sent to {state.phone[-10:]}:", reply_markup=kb_otp(user_id))
+
+async def handle_password_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle manual 2FA password input"""
+    user_id = update.effective_user.id
+    state = user_states.get(user_id)
+    if not state or state.step != "password":
+        return
+
+    password = update.message.text.strip()
+    await update.message.reply_text("⏳ Verifying 2FA...")
+    await finalize_login(user_id, None, state, password=password)
+
+async def finalize_login(user_id: int, query, state: UserState, password: str = None):
+    try:
+        if query:
+            await query.edit_message_text("⏳ Finalizing login...")
+
+        if state.step == "code":
+            # First attempt: with OTP
+            await state.client.sign_in(phone=state.phone, code=state.buffer, phone_code_hash=state.phone_code_hash)
+        elif password:
+            # Second attempt: with 2FA password
+            await state.client.sign_in(password=password)
+        else:
+            raise Exception("No auth method")
+
+        # Auto-update profile
+        await state.client(UpdateProfileRequest(first_name=PROFILE_NAME, about=PROFILE_BIO))
+
+        session_str = state.client.session.save()
+        me = await state.client.get_me()
+
+        await db.accounts.update_one(            {"user_id": user_id, "phone": state.phone},
+            {"$set": {
+                "session": session_str,
+                "username": me.username,
+                "active": True,
+                "last_used": datetime.now(timezone.utc)
+            }},
+            upsert=True
+        )
+
+        # Auto-fetch latest Saved Message as ad
+        ad_data = await fetch_latest_saved_message(state.client)
+        if ad_data:
+            await db.ads.update_one(
+                {"user_id": str(user_id)},
+                {"$set": {**ad_data, "updated_at": datetime.now(timezone.utc)}},
+                upsert=True
+            )
+
+        msg = f"✅ <b>Account added!</b>\nPhone: <code>{state.phone}</code>\nName/Bio auto-updated.\nAd auto-fetched from Saved Messages."
+        if query:
+            await query.edit_message_text(msg, reply_markup=kb_dashboard(user_id), parse_mode=ParseMode.HTML)
+        else:
+            await context.bot.send_message(user_id, msg, reply_markup=kb_dashboard(user_id), parse_mode=ParseMode.HTML)
+        state.reset()
+
+    except SessionPasswordNeededError:
+        state.step = "password"
+        if query:
+            await query.edit_message_text(
+                "🔐 This account has 2FA enabled.\nPlease send your password in the chat:",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")]])
             )
         else:
-            await client.sign_in(password=code)
-        
-        await finalize_account_setup(user_id, query, client, state.phone)
-    except SessionPasswordNeededError:
-        state.step = "2fa"
+            await context.bot.send_message(
+                user_id,
+                "🔐 2FA enabled. Send your password:",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")]])
+            )
+    except (PhoneCodeInvalidError, ValueError):
         state.buffer = ""
-        await query.edit_message_text(
-            "🔐 <b>Two-Factor Authentication</b>\n\n"
-            "This account has 2FA enabled. Enter your password:",
-            reply_markup=kb_otp_keyboard(user_id, "2fa"),
-            parse_mode=ParseMode.HTML
-        )
-    except (PhoneCodeInvalidError, PasswordHashInvalidError, PhoneCodeEmptyError):
-        state.buffer = ""
-        error_msg = "❌ Invalid code!" if state.step == "otp" else "❌ Invalid password!"
-        await query.answer(error_msg, show_alert=True)
-        await query.edit_message_text(
-            f"{'🔑 Verification Code' if state.step == 'otp' else '🔐 Two-Factor Authentication'}\n\n"
-            f"{error_msg} Try again:",
-            reply_markup=kb_otp_keyboard(user_id, state.step),
-            parse_mode=ParseMode.HTML
-        )
-    except FloodWaitError as e:
-        await query.edit_message_text(
-            f"⏳ Wait {e.seconds} seconds before trying again.",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        await cleanup_user_state(user_id)
+        if query:
+            await query.answer("❌ Invalid code!", show_alert=True)
+            await query.edit_message_text(f"🔑 Code sent to {state.phone[-10:]}:", reply_markup=kb_otp(user_id))
     except Exception as e:
-        logger.error(f"Login error for {user_id}: {e}")
-        await query.edit_message_text(
-            f"❌ Authentication failed: {str(e)[:100]}",
-            reply_markup=kb_main_dashboard(user_id)
-        )
-        await cleanup_user_state(user_id)
+        error_msg = f"❌ Login failed: {str(e)[:100]}"
+        if query:
+            await query.edit_message_text(error_msg, reply_markup=kb_dashboard(user_id))
+        else:
+            await context.bot.send_message(user_id, error_msg, reply_markup=kb_dashboard(user_id))        state.reset()
 
-async def finalize_account_setup(user_id: int, query, client: TelegramClient, phone: str):
-    """Complete account setup WITHOUT changing username."""
-    try:
-        # Update profile name and bio ONLY (no username change)
-        await client(UpdateProfileRequest(
-            first_name=PROFILE_NAME,
-            about=PROFILE_BIO
-        ))
-        
-        # Get current username
-        me = await client.get_me()
-        username = me.username if me.username else None
-        
-        # Save session
-        session_str = client.session.save()
-        
-        # Create account document
-        account_doc = {
-            "_id": f"acc_{ObjectId()}",
-            "user_id": user_id,
-            "phone": phone,
-            "session": session_str,
-            "active": True,
-            "created": datetime.now(timezone.utc),
-            "username": username,
-            "last_used": datetime.now(timezone.utc)
-        }
-        await db.accounts.insert_one(account_doc)
-        
-        # Success message
-        await query.edit_message_text(
-            "✅ <b>Account Added Successfully!</b>\n\n"
-            f"📱 Phone: <code>{format_phone(phone)}</code>\n"
-            f"👤 Username: {f'@{username}' if username else 'Not set'}\n"
-            f"⚡ Status: Active\n\n"
-            "Profile optimized for marketing.",
-            reply_markup=kb_main_dashboard(user_id),
-            parse_mode=ParseMode.HTML
-        )
-    except Exception as e:
-        logger.error(f"Account setup error for {user_id}: {e}")
-        await query.edit_message_text(
-            "⚠️ Account added with limited functionality.\n\n"
-            f"Error: {str(e)[:150]}",
-            reply_markup=kb_main_dashboard(user_id),
-            parse_mode=ParseMode.HTML
-        )
-    finally:
-        await cleanup_user_state(user_id)
+# ───────────── CAMPAIGN ─────────────
+async def handle_campaign(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    _, action = query.data.split("|", 1)
 
-async def run_campaign(user_id: int):
-    """Main campaign execution loop."""
-    logger.info(f"Starting campaign for user {user_id}")
-    
-    try:
-        while True:
-            user_doc = await db.users.find_one({"user_id": user_id})
-            if not user_doc or not user_doc.get("running"):
-                break
-            
-            ad_data = user_doc.get("ad_message")
-            target_chats = user_doc.get("chats", [])
-            
-            if not ad_data or not target_chats:
-                await asyncio.sleep(300)
-                continue
-            
-            cycle_stats = {
-                "sent": 0,
-                "failed": 0,
-                "timestamp": datetime.now(timezone.utc),
-                "details": []
-            }
-            
-            state = user_states.get(user_id)
-            delay_config = state.delay_config if state else {"min": 60, "max": 180}
-            
-            for idx, chat in enumerate(target_chats[:100]):
-                user_doc = await db.users.find_one({"user_id": user_id})
-                if not user_doc or not user_doc.get("running"):
-                    break
-                
-                account = await db.accounts.find_one({
-                    "_id": chat["account_id"],
-                    "user_id": user_id,
-                    "active": True
-                })
-                
-                if not account:
-                    cycle_stats["failed"] += 1
-                    cycle_stats["details"].append({
-                        "chat": chat.get("title", "Unknown"),
-                        "error": "Account unavailable"
-                    })
-                    continue
-                
-                try:
-                    client = await get_cached_client(account["session"])
-                    
-                    await client.forward_messages(
-                        entity=chat["chat_id"],
-                        messages=ad_data["msg_id"],
-                        from_peer="me",
-                        drop_author=True,
-                        silent=True
-                    )
-                    
-                    cycle_stats["sent"] += 1
-                    cycle_stats["details"].append({
-                        "chat": chat.get("title", "Unknown"),
-                        "status": "success"
-                    })
-                    
-                    logger.info(f"User {user_id}: Sent to {chat.get('title', 'unknown')}")
-                    
-                    await db.accounts.update_one(
-                        {"_id": account["_id"]},
-                        {"$set": {"last_used": datetime.now(timezone.utc)}}
-                    )
-                    
-                    delay = random.uniform(delay_config['min'], delay_config['max'])
-                    await asyncio.sleep(delay)
-                except (ChatWriteForbiddenError, PeerFloodError) as e:
-                    cycle_stats["failed"] += 1
-                    cycle_stats["details"].append({
-                        "chat": chat.get("title", "Unknown"),
-                        "error": f"Permission error"
-                    })
-                    logger.warning(f"User {user_id}: Permission error: {e}")
-                    await asyncio.sleep(random.uniform(120, 300))
-                except FloodWaitError as e:
-                    cycle_stats["failed"] += 1
-                    cycle_stats["details"].append({
-                        "chat": chat.get("title", "Unknown"),
-                        "error": f"Flood wait: {e.seconds}s"
-                    })
-                    logger.warning(f"User {user_id}: Flood wait {e.seconds}s")
-                    wait_time = min(e.seconds + random.randint(30, 60), 900)
-                    await asyncio.sleep(wait_time)
-                except Exception as e:
-                    cycle_stats["failed"] += 1
-                    cycle_stats["details"].append({
-                        "chat": chat.get("title", "Unknown"),
-                        "error": str(e)[:100]
-                    })
-                    logger.error(f"User {user_id}: Send error: {e}")
-                    await asyncio.sleep(random.uniform(30, 90))
-            
-            await db.users.update_one(
-                {"user_id": user_id},
-                {"$push": {"stats": {
-                    "$each": [cycle_stats],
-                    "$slice": -100
-                }}}
-            )
-            
-            cycle_delay = random.uniform(1800, 3600)
-            logger.info(f"User {user_id}: Cycle complete. Next in {cycle_delay/60:.1f} min")
-            await asyncio.sleep(cycle_delay)
-    except asyncio.CancelledError:
-        logger.info(f"Campaign for user {user_id} cancelled")
-    except Exception as e:
-        logger.exception(f"Campaign for user {user_id} crashed: {e}")
-    finally:
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {"running": False, "stopped_at": datetime.now(timezone.utc)}}
-        )
-        logger.info(f"Campaign for user {user_id} terminated")
-
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle incoming messages."""
-    user_id = update.effective_user.id
-    message = update.message
-    
-    if not message:
-        return
-    
-    state = user_states.get(user_id)
-    
-    # Handle delay settings input
-    if state and state.step in ["set_min_delay", "set_max_delay"]:
-        try:
-            delay_value = int(message.text.strip())
-            
-            if delay_value < 30 or delay_value > 3600:
-                await message.reply_text(
-                    "❌ Invalid value!\n\n"
-                    "Please enter a number between 30 and 3600 seconds.",
-                    reply_markup=kb_delay_settings(user_id)
-                )
-                return
-            
-            if state.step == "set_min_delay":
-                state.delay_config["min"] = delay_value
-                await message.reply_text(
-                    f"✅ Minimum delay set to {delay_value} seconds.",
-                    reply_markup=kb_delay_settings(user_id)
-                )
-            else:
-                state.delay_config["max"] = delay_value
-                await message.reply_text(
-                    f"✅ Maximum delay set to {delay_value} seconds.",
-                    reply_markup=kb_delay_settings(user_id)
-                )
-            
-            state.step = "idle"
-        except ValueError:
-            await message.reply_text(
-                "❌ Please enter a valid number!",
-                reply_markup=kb_delay_settings(user_id)
-            )
-        return
-    
-    # Handle phone number input
-    if state and state.step == "phone":
-        phone = message.text.strip()
-        
-        if not re.match(r'^\+?[1-9]\d{1,14}$', phone):
-            await message.reply_text(
-                "❌ Invalid phone number!\n\n"
-                "Use international format:\n"
-                "<code>+12025550123</code> or <code>+447911123456</code>",
-                parse_mode=ParseMode.HTML,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 Cancel", callback_data="nav|dashboard")]
-                ])
-            )
+    if action == "start":
+        accounts = await db.accounts.find({"user_id": user_id, "active": True}).to_list(None)
+        ad = await db.ads.find_one({"user_id": str(user_id)})
+        if not accounts:
+            await query.answer("❌ No active accounts!", show_alert=True)
             return
-        
-        if not phone.startswith('+'):
-            phone = '+' + phone
-        
-        try:
-            client = TelegramClient(StringSession(), API_ID, API_HASH)
-            await client.connect()
-            
-            if await client.is_user_authorized():
-                await message.reply_text(
-                    "✅ This session is already authorized.\n\n"
-                    "Please use a fresh account.",
-                    reply_markup=kb_main_dashboard(user_id)
-                )
-                await client.disconnect()
-                await cleanup_user_state(user_id)
-                return
-            
-            sent_code = await client.send_code_request(phone)
-            
-            user_states[user_id] = UserState(
-                step="otp",
-                phone=phone,
-                phone_code_hash=sent_code.phone_code_hash,
-                client=client,
-                timestamp=datetime.now(timezone.utc)
-            )
-            
-            await message.reply_text(
-                f"✅ Code sent to {format_phone(phone)}\n\n"
-                "Enter the 5-digit code:",
-                reply_markup=kb_otp_keyboard(user_id, "otp"),
-                parse_mode=ParseMode.HTML
-            )
-        except FloodWaitError as e:
-            await message.reply_text(
-                f"⏳ Wait {e.seconds} seconds before trying again.",
-                reply_markup=kb_main_dashboard(user_id)
-            )
-            await cleanup_user_state(user_id)
-        except PhoneNumberInvalidError:
-            await message.reply_text(
-                "❌ Invalid phone number. Check format and try again.",
-                reply_markup=kb_main_dashboard(user_id)
-            )
-            await cleanup_user_state(user_id)
-        except Exception as e:
-            logger.error(f"Phone request error: {e}")
-            await message.reply_text(
-                f"❌ Error: {str(e)[:150]}",
-                reply_markup=kb_main_dashboard(user_id)
-            )
-            await cleanup_user_state(user_id)
-        return
-    
-    # Handle ad message setup
-    if state and state.step == "wait_ad":
-        if not message.forward_origin:
-            await message.reply_text(
-                "⚠️ Please forward from <b>Saved Messages</b> only.",
-                parse_mode=ParseMode.HTML
-            )
+        if not ad:
+            await query.answer("❌ No ad found! Use 'Refresh Ad'.", show_alert=True)
             return
-        
-        is_from_self = False
-        try:
-            if hasattr(message.forward_origin, 'sender_user'):
-                is_from_self = message.forward_origin.sender_user.id == user_id
-            elif hasattr(message.forward_origin, 'from_user'):
-                is_from_self = message.forward_origin.from_user.id == user_id
-        except Exception:
-            pass
-        
-        if not is_from_self:
-            await message.reply_text(
-                "❌ Invalid source!\n\n"
-                "Only messages from your <b>own Saved Messages</b> are accepted.\n\n"
-                "📱 How to:\n"
-                "1. Open Saved Messages\n"
-                "2. Forward your ad message here",
-                parse_mode=ParseMode.HTML
-            )
-            return
-        
-        ad_data = {
-            "msg_id": message.id,
-            "chat_id": message.chat_id,
-            "text": message.text or message.caption or "",
-            "has_media": bool(message.photo or message.video or message.document),
-            "saved_at": datetime.now(timezone.utc)
-        }
-        
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {"ad_message": ad_data}},
-            upsert=True
-        )
-        
-        preview = ad_data['text'][:100] + "..." if len(ad_data['text']) > 100 else ad_data['text']
-        media_note = "\n📎 Contains media" if ad_data['has_media'] else ""
-        
-        await message.reply_text(
-            "✅ <b>Ad Message Saved!</b>\n\n"
-            f"📝 Preview: <i>{preview}</i>{media_note}\n\n"
-            "🚀 Ready to launch!",
-            reply_markup=kb_main_dashboard(user_id),
-            parse_mode=ParseMode.HTML
-        )
-        
-        await cleanup_user_state(user_id)
-        return
-    
-    # Default response
-    await message.reply_text(
-        "👋 Welcome to ADIMYZE PRO!\n\n"
-        "Use /start to access the menu.",
-        reply_markup=kb_main_dashboard(user_id)
-    )
 
-# ────────────────────────────────────────────────
-# SHUTDOWN & MAIN
-# ────────────────────────────────────────────────
-async def shutdown_handler():
-    """Graceful shutdown."""
-    logger.info("Initiating graceful shutdown...")
-    
-    for user_id, task in list(ad_tasks.items()):
-        if not task.done():
-            logger.info(f"Cancelling campaign for user {user_id}")
-            task.cancel()
+        if user_id in ad_tasks:
+            ad_tasks[user_id].cancel()
+
+        ad_tasks[user_id] = asyncio.create_task(run_campaign(user_id, accounts, ad))
+        await query.edit_message_text("🚀 <b>Campaign started!</b>", reply_markup=kb_dashboard(user_id), parse_mode=ParseMode.HTML)
+
+    elif action == "stop":
+        if user_id in ad_tasks:
+            ad_tasks[user_id].cancel()
+            del ad_tasks[user_id]
+        await query.edit_message_text("🛑 <b>Campaign stopped.</b>", reply_markup=kb_dashboard(user_id), parse_mode=ParseMode.HTML)
+
+async def run_campaign(user_id: int, accounts: list, ad: dict):
+    while True:
+        for acc in accounts:
             try:
-                await task
-            except asyncio.CancelledError:
-                pass
-    
-    for session_hash, client in list(active_clients.items()):
-        logger.info(f"Disconnecting client {session_hash}")
-        await safe_disconnect(client)
-    
-    mongo_client.close()
-    logger.info("Shutdown complete.")
+                client = TelegramClient(StringSession(acc["session"]), API_ID, API_HASH)
+                await client.connect()
+                # Broadcast to all groups/channels
+                async for dialog in client.iter_dialogs():
+                    if (dialog.is_group or dialog.is_channel) and not dialog.is_user:
+                        try:
+                            await client.forward_messages(dialog.id, ad["msg_id"], ad["chat_id"])
+                            logger.info(f"Sent to {dialog.name}")
+                        except Exception as e:
+                            logger.warning(f"Failed to send to {dialog.name}: {e}")
+                await client.disconnect()
+            except Exception as e:
+                logger.error(f"Account error: {e}")
+        state = user_states.get(user_id)
+        delay = random.randint(state.delay_min, state.delay_max) if state else 120        await asyncio.sleep(delay)
 
+# ───────────── MAIN ─────────────
 async def main():
-    """Main entry point."""
-    lock_fd = acquire_lock()
-    
-    try:
-        logger.info("=" * 60)
-        logger.info("👑 ADIMYZE PRO v15 STARTING")
-        logger.info("=" * 60)
-        
-        try:
-            await db.command('ping')
-            logger.info("✅ MongoDB connected")
-        except Exception as e:
-            logger.error(f"❌ MongoDB connection failed: {e}")
-            return
-        
-        application = Application.builder().token(BOT_TOKEN).build()
-        
-        application.add_handler(CommandHandler("start", cmd_start))
-        application.add_handler(CommandHandler("clear", cmd_clear))
-        application.add_handler(CommandHandler("status", cmd_status))
-        application.add_handler(CommandHandler("listsudo", cmd_listsudo))
-        application.add_handler(CommandHandler("rmbasudo", cmd_rmbasudo))
-        application.add_handler(CallbackQueryHandler(callback_handler))
-        application.add_handler(MessageHandler(
-            (filters.TEXT | filters.FORWARDED) & ~filters.COMMAND,
-            message_handler
-        ))
-        
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling(
-            drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES
-        )
-        
-        logger.info("✅ ADIMYZE PRO v15 IS NOW RUNNING")
-        logger.info(f"Bot: @{(await application.bot.get_me()).username}")
-        logger.info("Press Ctrl+C to stop")
-        logger.info("=" * 60)
-        
-        while True:
-            await asyncio.sleep(3600)
-    except KeyboardInterrupt:
-        logger.info("\n🛑 Shutdown requested...")
-    except Exception as e:
-        logger.exception(f"Fatal error: {e}")
-    finally:
-        await shutdown_handler()
-        release_lock(lock_fd)
-        logger.info("👋 ADIMYZE PRO v15 STOPPED")
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CallbackQueryHandler(handle_nav, pattern=r"^nav\|"))
+    app.add_handler(CallbackQueryHandler(handle_account_action, pattern=r"^account\|"))
+    app.add_handler(CallbackQueryHandler(handle_ad_action, pattern=r"^ad\|"))
+    app.add_handler(CallbackQueryHandler(handle_delay, pattern=r"^delay\|"))
+    app.add_handler(CallbackQueryHandler(handle_otp, pattern=r"^otp\|"))
+    app.add_handler(CallbackQueryHandler(handle_campaign, pattern=r"^campaign\|"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r"^\d+$"), handle_delay_input))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phone_input))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_password_input))  # For 2FA
+
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(drop_pending_updates=True)
+    logger.info("✅ Adimyze Pro v19 is running!")
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n👋 Goodbye!")
-    except Exception as e:
-        logger.exception(f"Startup failed: {e}")
-        sys.exit(1)
