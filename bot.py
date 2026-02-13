@@ -391,7 +391,8 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"❌ Error: {e}")
         state.step = "idle"
 
-async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):    query = update.callback_query
+async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     state = user_states.get(user_id)
