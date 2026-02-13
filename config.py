@@ -172,4 +172,4 @@ Account Stats:
 
 Current Delay: 300s
 
-Mujhe 300 sec nhi 5 sec ka delay chaiye mass broadcasting wla okh and rewrite entire with same text and emojis mt daalna !! And rewrite entire with same ui flow
+ rewrite entire with same text and emojis mt daalna !! And rewrite entire with same ui flow
