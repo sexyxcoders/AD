@@ -2,52 +2,6 @@ import asyncio
 import logging
 import re
 import sys
-import os
-import random
-from datetime import datetime, timezone
-from typing import Dict, Optional
-from dataclasses import dataclass, field
-
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
-from telegram.constants import ParseMode
-from telegram.error import BadRequest
-
-from telethon import TelegramClient
-from telethon.sessions import StringSession
-from telethon.tl.functions.account import UpdateProfileRequest
-from teleAbsolutely! Below is the **fully customized, production-ready Telegram bot** that matches **exactly** your requested UI/UX — with:
-
-✅ **Custom welcome message & buttons**  
-✅ **Dashboard with all 8 buttons + Back**  
-✅ **Add Account flow**: Phone → OTP Keypad → (Optional 2FA manual input) → Success  
-✅ **Auto-update name & bio on login**  
-✅ **Set Ad Message**: User sends any message → saved  
-✅ **Set Time Interval**: Preset buttons + custom input  
-✅ **Start/Stop Ads**: Broadcast to all joined groups  
-✅ **Delete Accounts**  
-✅ **Analytics**: Summary + Detailed Report inline button  
-✅ **Auto Reply**: "Coming soon" placeholder  
-✅ **All screens have [Back] button**  
-✅ **Beautiful start image**
-
----
-
-### 📁 Save as `bot.py`
-
-```python
-import asyncio
-import logging
-import re
-import sys
-import osimport random
 from datetime import datetime, timezone
 from typing import Dict, Optional
 from dataclasses import dataclass, field
@@ -76,7 +30,6 @@ from telethon.errors import (
 
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# ───────────── CONFIGURATION ─────────────
 BOT_TOKEN = '8463982454:AAErd8EZswKgQ1BNF_r-N8iUH8HQcb293lQ'
 API_ID = 22657083
 API_HASH = 'd6186691704bd901bdab275ceaab88f3'
@@ -95,20 +48,18 @@ logger = logging.getLogger(__name__)
 
 mongo_client = AsyncIOMotorClient(MONGO_URI)
 db = mongo_client[DB_NAME]
-
-# ───────────── USER STATE ─────────────@dataclass
+@dataclass
 class UserState:
     step: str = "idle"
     phone: str = ""
     phone_code_hash: str = ""
     client: Optional[TelegramClient] = None
     buffer: str = ""
-    delay: int = 300  # seconds
+    delay: int = 300
 
 user_states: Dict[int, UserState] = {}
 ad_tasks: Dict[int, asyncio.Task] = {}
 
-# ───────────── KEYBOARDS ─────────────
 def kb_start() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("     Dashboard       ", callback_data="nav|dashboard")],
@@ -171,7 +122,6 @@ def kb_analytics_detailed() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
     ])
 
-# ───────────── TEMPLATES ─────────────
 WELCOME_TEXT = """╰_╯ Welcome to @Tecxo Free Ads bot — The Future of Telegram Automation 
 
 • Premium Ad Broadcasting
@@ -243,8 +193,8 @@ To set custom time interval Send a number (in seconds):
 ANALYTICS_SUMMARY = """╰_╯@NexaCoders ANALYTICS
 
 Broadcast Cycles Completed: {cycles}
-Messages Sent: {sent}Failed Sends: {failed}
-Logger Failures: 0
+Messages Sent: {sent}
+Failed Sends: {failed}Logger Failures: 0
 Active Accounts: {active_acc}
 Avg Delay: {delay}s
 
@@ -276,9 +226,8 @@ AUTO_REPLY_MSG = """╰_╯AUTO REPLY FEATURE
 This feature is coming soon!
 Stay tuned for automated reply capabilities to enhance your campaigns."""
 
-# ───────────── HANDLERS ─────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo_url = "https://telegra.ph/file/8a7f7e5c1a3b4e9d8f0a1.jpg"  # Replace with your image
+    photo_url = "https://telegra.ph/file/8a7f7e5c1a3b4e9d8f0a1.jpg"
     try:
         await update.message.reply_photo(photo_url, caption=WELCOME_TEXT, reply_markup=kb_start(), parse_mode=ParseMode.HTML)
     except BadRequest:
@@ -292,9 +241,9 @@ async def handle_nav(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if target == "start":
         await cmd_start(query, context)
     elif target == "dashboard":
-        await query.edit_message_text("Dashboard:", reply_markup=kb_dashboard())    elif target == "howto":
+        await query.edit_message_text("Dashboard:", reply_markup=kb_dashboard())
+    elif target == "howto":
         await query.edit_message_text(HOW_TO_USE, reply_markup=kb_back("nav|start"))
-
 async def handle_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -341,8 +290,8 @@ async def handle_delay_nav(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    state = user_states.setdefault(user_id, UserState())    await query.edit_message_text(SET_DELAY_PROMPT.format(current=state.delay), reply_markup=kb_delay_presets())
-
+    state = user_states.setdefault(user_id, UserState())
+    await query.edit_message_text(SET_DELAY_PROMPT.format(current=state.delay), reply_markup=kb_delay_presets())
 async def handle_delay_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -372,7 +321,6 @@ async def handle_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     accounts = await db.accounts.count_documents({"user_id": user_id})
     active_acc = await db.accounts.count_documents({"user_id": user_id, "active": True})
-    ad_doc = await db.ads.find_one({"user_id": str(user_id)})
     state = user_states.get(user_id) or UserState()
 
     if view == "main":
@@ -390,10 +338,10 @@ async def handle_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 delay=state.delay,
                 rate=rate
             ),
-            reply_markup=kb_analytics_detailed()        )
+            reply_markup=kb_analytics_detailed()
+        )
     elif view == "detailed":
-        date = datetime.now().strftime("%d/%m/%y")
-        inactive_acc = accounts - active_acc
+        date = datetime.now().strftime("%d/%m/%y")        inactive_acc = accounts - active_acc
         await query.edit_message_text(
             DETAILED_REPORT.format(
                 date=date,
@@ -414,7 +362,6 @@ async def handle_feature(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     await query.edit_message_text(AUTO_REPLY_MSG, reply_markup=kb_back("nav|dashboard"))
 
-# ───────────── LOGIN FLOW ─────────────
 async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     state = user_states.get(user_id)
@@ -439,11 +386,11 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         await update.message.reply_text(OTP_WAIT.format(phone=phone))
         await update.message.reply_text(OTP_INPUT, reply_markup=kb_otp(user_id))
-    except Exception as e:        await update.message.reply_text(f"❌ Error: {e}")
-        state.reset()
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+        state.step = "idle"
 
-async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):    query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     state = user_states.get(user_id)
@@ -488,11 +435,11 @@ async def finalize_login(user_id: int, query, state: UserState, password: str = 
         if state.step == "code":
             await state.client.sign_in(phone=state.phone, code=state.buffer, phone_code_hash=state.phone_code_hash)
         elif password:
-            await state.client.sign_in(password=password)        else:
+            await state.client.sign_in(password=password)
+        else:
             raise Exception("No auth")
 
         await state.client(UpdateProfileRequest(first_name=PROFILE_NAME, about=PROFILE_BIO))
-
         session_str = state.client.session.save()
         me = await state.client.get_me()
 
@@ -533,16 +480,15 @@ async def finalize_login(user_id: int, query, state: UserState, password: str = 
             await context.bot.send_message(user_id, f"❌ Login failed: {str(e)[:100]}", reply_markup=kb_dashboard())
         state.step = "idle"
 
-# ───────────── CAMPAIGN ─────────────
 async def handle_campaign(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, action = query.data.split("|", 1)    user_id = query.from_user.id
+    _, action = query.data.split("|", 1)
+    user_id = query.from_user.id
 
     if action == "start":
         accounts = await db.accounts.count_documents({"user_id": user_id, "active": True})
-        ad = await db.ads.find_one({"user_id": str(user_id)})
-        if not accounts:
+        ad = await db.ads.find_one({"user_id": str(user_id)})        if not accounts:
             await query.answer("❌ No accounts!", show_alert=True)
             return
         if not ad:
@@ -552,7 +498,6 @@ async def handle_campaign(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "stop":
         await query.edit_message_text("🛑 Ads stopped.", reply_markup=kb_dashboard())
 
-# ───────────── MAIN ─────────────
 async def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
