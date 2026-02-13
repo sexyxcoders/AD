@@ -458,7 +458,7 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "back":
         state.buffer = state.buffer[:-1]
 
-    # SUBMIT
+    # SUBMIT OTP
     elif action == "submit":
         if len(state.buffer) != 5:
             await query.answer("Enter 5 digit OTP!", show_alert=True)
@@ -466,23 +466,24 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await finalize_login(user_id, context)
         return
 
-    # DIGITS
+    # DIGIT INPUT
     elif action.isdigit() and len(state.buffer) < 5:
         state.buffer += action
 
     # MASK OTP
-    masked = " ".join(["*"] * len(state.buffer)) + " _" * (5 - len(state.buffer))
+    masked = " ".join(["•"] * len(state.buffer)) + " _" * (5 - len(state.buffer))
 
-    # EDIT UI TEXT (🔥 THIS IS YOUR ANIMATION)
-    await query.edit_message_text(
-        f"""╰_╯ OTP sent to {state.phone}! ✅
+    # EDIT OTP UI MESSAGE
+    try:
+        await query.edit_message_text(
+            f"""╰_╯ OTP sent to {state.phone}! ✅
 
 Enter the OTP using the keypad below:
 Current: {masked}
 Format: 12345 (no spaces)
 Expires in: 5 minutes""",
-        reply_markup=kb_otp(user_id)
-    )
+            reply_markup=kb_otp(user_id)
+        )
     except BadRequest:
         pass
 
