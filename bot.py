@@ -47,8 +47,7 @@ BANNER_URL = "https://files.catbox.moe/zttfbe.jpg"
 PROFILE_NAME = "Nexa Ads"
 PROFILE_BIO = "🚀 Professional Telegram Marketing Automation | Managed by @nexacoders"
 
-# Anti-flood configuration (safe defaults)
-MIN_DELAY = 5  # 5 minutes minimum (Telegram-safe)
+# Anti-flood configuration (safe defaults)MIN_DELAY = 5  # 5 minutes minimum (Telegram-safe)
 MAX_MESSAGES_PER_HOUR = 1000  # Conservative limit to avoid bans
 FLOOD_COOLDOWN = 3600  # 1 hour cooldown after flood error
 
@@ -97,8 +96,7 @@ async def safe_edit_or_send(query, text, reply_markup=None):
     try:
         if query.message.photo:
             await query.edit_message_caption(caption=text, reply_markup=reply_markup)
-        else:
-            await query.edit_message_text(text=text, reply_markup=reply_markup)
+        else:            await query.edit_message_text(text=text, reply_markup=reply_markup)
     except BadRequest as e:
         error_msg = str(e).lower()
         if "message is not modified" in error_msg:
@@ -119,14 +117,10 @@ async def safe_edit_or_send(query, text, reply_markup=None):
 def kb_otp(user_id: int, error: str = "") -> InlineKeyboardMarkup:
     state = user_states.get(user_id, UserState())
     digits = list(state.buffer.ljust(5, "○"))[:5]
-    
+
     # Modern 3x4 keypad layout like real phones
     keypad = [
-        [InlineKeyboardButton(digits[0], callback_data="otp_display"),
-         InlineKeyboardButton(digits[1], callback_data="otp_display"),
-         InlineKeyboardButton(digits[2], callback_data="otp_display"),
-         InlineKeyboardButton(digits[3], callback_data="otp_display"),
-         InlineKeyboardButton(digits[4], callback_data="otp_display")],
+        [InlineKeyboardButton(f"Current: {' '.join(digits)}", callback_data="otp_display")],
         [InlineKeyboardButton("1", callback_data="otp|1"),
          InlineKeyboardButton("2", callback_data="otp|2"),
          InlineKeyboardButton("3", callback_data="otp|3")],
@@ -138,22 +132,20 @@ def kb_otp(user_id: int, error: str = "") -> InlineKeyboardMarkup:
          InlineKeyboardButton("9", callback_data="otp|9")],
         [InlineKeyboardButton("⌫", callback_data="otp|back"),
          InlineKeyboardButton("0", callback_data="otp|0"),
-         InlineKeyboardButton("↺ Resend", callback_data="otp|resend")],
+         InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")],
     ]
-    
+
     if error:
         keypad.insert(0, [InlineKeyboardButton(f"⚠️ {error}", callback_data="otp_error")])
-    
+
     keypad.append([InlineKeyboardButton("Show Code", url="tg://openmessage?user_id=777000")])
-    keypad.append([InlineKeyboardButton("❌", callback_data="otp|cancel")])
-    
+
     return InlineKeyboardMarkup(keypad)
 
 # --- KEYBOARDS ---
 def kb_start() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")],
-        [InlineKeyboardButton("Updates", url="https://t.me/testttxs"),
+        [InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")],        [InlineKeyboardButton("Updates", url="https://t.me/testttxs"),
          InlineKeyboardButton("Support", url="https://t.me/nexaxoders")],
         [InlineKeyboardButton("How to Use", callback_data="nav|howto")],
         [InlineKeyboardButton("Powered by", url="https://t.me/nexacoders")]
@@ -161,7 +153,7 @@ def kb_start() -> InlineKeyboardMarkup:
 
 def kb_dashboard(user_id: int) -> InlineKeyboardMarkup:
     campaign_active = user_id in campaign_tasks and campaign_tasks[user_id].status == CampaignStatus.RUNNING
-    
+
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Add Accounts", callback_data="acc|add"),
          InlineKeyboardButton("My Accounts", callback_data="acc|list|0")],
@@ -179,7 +171,7 @@ def kb_dashboard(user_id: int) -> InlineKeyboardMarkup:
 def kb_delay(current_delay: int = MIN_DELAY) -> InlineKeyboardMarkup:
     def get_emoji(sec: int) -> str:
         return "🔴" if sec < 600 else "🟡" if sec < 1200 else "🟢"
-    
+
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"5 sec {get_emoji(05)} ⚠️ Risky", callback_data="setdelay|300"),
          InlineKeyboardButton(f"10 min {get_emoji(600)} ✅ Recommended", callback_data="setdelay|600")],
@@ -193,21 +185,20 @@ def kb_accounts(accounts: List[dict], page: int = 0) -> InlineKeyboardMarkup:
     start = page * page_size
     end = start + page_size
     page_accounts = accounts[start:end]
-    
+
     for acc in page_accounts:
         status = "🟢" if acc.get("active", False) else "🔴"
         phone = acc["phone"]
         display = f"{status} ••••{phone[-4:]}"
         buttons.append([InlineKeyboardButton(display, callback_data=f"acc|detail|{acc['_id']}")])
-    
+
     nav_row = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"acc|list|{page-1}"))
-    if end < len(accounts):
+        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"acc|list|{page-1}"))    if end < len(accounts):
         nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"acc|list|{page+1}"))
     if nav_row:
         buttons.append(nav_row)
-    
+
     buttons.append([InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")])
     return InlineKeyboardMarkup(buttons)
 
@@ -224,6 +215,47 @@ def kb_confirm_delete(acc_id: str) -> InlineKeyboardMarkup:
          InlineKeyboardButton("❌ Cancel", callback_data="nav|dashboard")]
     ])
 
+def kb_ad_message(current_msg: str = "") -> InlineKeyboardMarkup:
+    if current_msg:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("Current Ad Message:", callback_data="noop")],
+            [InlineKeyboardButton(current_msg[:30] + ("..." if len(current_msg) > 30 else ""), callback_data="noop")],
+            [InlineKeyboardButton("Tips for effective ads:", callback_data="noop")],
+            [InlineKeyboardButton("•Keep it concise and engaging", callback_data="noop")],
+            [InlineKeyboardButton("•Use premium emojis for flair", callback_data="noop")],
+            [InlineKeyboardButton("•Include clear call-to-action", callback_data="noop")],
+            [InlineKeyboardButton("•Avoid excessive caps or spam words", callback_data="noop")],
+            [InlineKeyboardButton("Send your ad message now:", callback_data="noop")],
+            [InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")]
+        ])
+    else:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("Tips for effective ads:", callback_data="noop")],
+            [InlineKeyboardButton("•Keep it concise and engaging", callback_data="noop")],
+            [InlineKeyboardButton("•Use premium emojis for flair", callback_data="noop")],
+            [InlineKeyboardButton("•Include clear call-to-action", callback_data="noop")],
+            [InlineKeyboardButton("•Avoid excessive caps or spam words", callback_data="noop")],
+            [InlineKeyboardButton("Send your ad message now:", callback_data="noop")],
+            [InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")]
+        ])
+
+def kb_analytics() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Detailed Report", callback_data="stat|detail")],
+        [InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")]
+    ])
+def kb_analytics_main() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Detailed Report", callback_data="stat|detail")],
+        [InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")]
+    ])
+
+def kb_detailed_report() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Analytics", callback_data="stat|main")],
+        [InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")]
+    ])
+
 # --- BROADCAST ENGINE (Production-Ready) ---
 class BroadcastEngine:
     def __init__(self, user_id: int):
@@ -238,31 +270,30 @@ class BroadcastEngine:
         self.active_sessions: Dict[str, TelegramClient] = {}
         self.target_groups: List[Channel] = []
         self.account_rotation_index = 0
-        
+
     async def initialize(self) -> bool:
         """Load campaign configuration from database"""
         try:
             # Load user settings
             user_doc = await db.users.find_one({"user_id": str(self.user_id)})
             self.delay = user_doc.get("delay", MIN_DELAY) if user_doc else MIN_DELAY
-            
+
             # Load ad message
             ad_doc = await db.ads.find_one({"user_id": str(self.user_id)})
             if not ad_doc or not ad_doc.get("text"):
                 logger.warning(f"User {self.user_id} has no ad message configured")
                 return False
             self.ad_text = ad_doc["text"]
-            
+
             # Load active accounts
             self.accounts = await db.accounts.find({
                 "user_id": self.user_id, 
                 "active": True
             }).to_list(None)
-            
+
             if not self.accounts:
-                logger.warning(f"User {self.user_id} has no active accounts")
-                return False
-                
+                logger.warning(f"User {self.user_id} has no active accounts")                return False
+
             # Initialize Telethon sessions
             for acc in self.accounts:
                 try:
@@ -273,7 +304,7 @@ class BroadcastEngine:
                         connection_retries=3
                     )
                     await client.connect()
-                    
+
                     if not await client.is_user_authorized():
                         logger.warning(f"Session expired for {acc['phone']}")
                         await db.accounts.update_one(
@@ -281,7 +312,7 @@ class BroadcastEngine:
                             {"$set": {"active": False}}
                         )
                         continue
-                    
+
                     # Update profile to maintain consistency
                     try:
                         await client(UpdateProfileRequest(
@@ -290,7 +321,7 @@ class BroadcastEngine:
                         ))
                     except Exception as e:
                         logger.warning(f"Profile update failed for {acc['phone']}: {e}")
-                    
+
                     self.active_sessions[acc["phone"]] = client
                     logger.info(f"Initialized session for {acc['phone']}")
                 except Exception as e:
@@ -299,45 +330,44 @@ class BroadcastEngine:
                         {"_id": acc["_id"]},
                         {"$set": {"active": False}}
                     )
-            
+
             if not self.active_sessions:
                 logger.error(f"No valid sessions available for user {self.user_id}")
                 return False
-                
+
             # Discover target groups (only groups where we can send messages)
             await self._discover_target_groups()
-            
+
             if not self.target_groups:
                 logger.warning(f"No target groups found for user {self.user_id}")
                 return False
-                
             self.running = True
             logger.info(f"Broadcast engine initialized for user {self.user_id} with {len(self.active_sessions)} accounts and {len(self.target_groups)} target groups")
             return True
-            
+
         except Exception as e:
             logger.exception(f"Broadcast initialization failed for user {self.user_id}: {e}")
             return False
-    
+
     async def _discover_target_groups(self):
         """Discover groups/channels where the account can send messages"""
         sample_client = next(iter(self.active_sessions.values()))
-        
+
         try:
             # Get all dialogs (chats, groups, channels)
             dialogs = await sample_client.get_dialogs(limit=100)
-            
+
             for dialog in dialogs:
                 entity = dialog.entity
-                
+
                 # Skip private chats and bots
                 if not hasattr(entity, 'broadcast') and not hasattr(entity, 'megagroup'):
                     continue
-                    
+
                 # Skip broadcast channels (can't send messages there)
                 if hasattr(entity, 'broadcast') and entity.broadcast:
                     continue
-                    
+
                 # Check if we can actually send messages
                 try:
                     if hasattr(entity, 'megagroup') and entity.megagroup:
@@ -348,22 +378,21 @@ class BroadcastEngine:
                     continue
                 except Exception as e:
                     logger.debug(f"Skipping group {entity.title}: {e}")
-                    
+
             logger.info(f"Discovered {len(self.target_groups)} target groups for broadcasting")
-            
+
         except Exception as e:
             logger.exception(f"Group discovery failed: {e}")
-    
+
     async def _get_next_account(self) -> Optional[TelegramClient]:
         """Rotate through accounts to distribute load and avoid detection"""
         if not self.active_sessions:
             return None
-            
+
         phones = list(self.active_sessions.keys())
-        client = self.active_sessions[phones[self.account_rotation_index]]
-        self.account_rotation_index = (self.account_rotation_index + 1) % len(phones)
+        client = self.active_sessions[phones[self.account_rotation_index]]        self.account_rotation_index = (self.account_rotation_index + 1) % len(phones)
         return client
-    
+
     async def _safe_send(self, client: TelegramClient, group: Channel) -> bool:
         """Send message with flood protection and error handling"""
         try:
@@ -374,14 +403,14 @@ class BroadcastEngine:
                 "phone": next(p for p, c in self.active_sessions.items() if c == client),
                 "hour": now.strftime("%Y-%m-%d-%H")
             }) or {"count": 0}
-            
+
             if account_stats["count"] >= MAX_MESSAGES_PER_HOUR:
                 logger.warning(f"Hourly limit reached for account. Skipping send.")
                 return False
-            
+
             # Send message
             await client.send_message(group, self.ad_text)
-            
+
             # Update stats
             await db.broadcast_stats.update_one(
                 {
@@ -392,899 +421,505 @@ class BroadcastEngine:
                 {"$inc": {"count": 1, "total": 1}},
                 upsert=True
             )
-            
+
             # Update campaign stats
             await db.campaigns.update_one(
                 {"user_id": self.user_id, "status": "running"},
                 {"$inc": {"messages_sent": 1}, "$set": {"last_sent": now}},
                 upsert=True
             )
-            
+
             self.sent_count += 1
             logger.info(f"Sent message to {group.title} via {client}")
             return True
-            
+
         except (FloodWaitError, PeerFloodError) as e:
             wait_time = getattr(e, 'seconds', FLOOD_COOLDOWN)
             logger.warning(f"Flood protection triggered. Waiting {wait_time}s")
             self.last_flood_error = datetime.now(timezone.utc) + timedelta(seconds=wait_time)
-            
+
             # Deactivate account temporarily
-            phone = next(p for p, c in self.active_sessions.items() if c == client)
-            await db.accounts.update_one(
+            phone = next(p for p, c in self.active_sessions.items() if c == client)            await db.accounts.update_one(
                 {"user_id": self.user_id, "phone": phone},
                 {"$set": {"flood_cooldown_until": datetime.now(timezone.utc) + timedelta(seconds=wait_time)}}
             )
-            
+
             # Global campaign cooldown
             await db.campaigns.update_one(
                 {"user_id": self.user_id},
                 {"$set": {"flood_cooldown_until": datetime.now(timezone.utc) + timedelta(seconds=wait_time)}}
             )
-            
+
             self.failed_count += 1
             return False
-            
+
         except (UserBannedInChannelError, ChatWriteForbiddenError) as e:
             logger.warning(f"Cannot send to {group.title}: {e}")
             self.failed_count += 1
             return False
-            
+
         except Exception as e:
             logger.error(f"Send failed to {group.title}: {e}")
             self.failed_count += 1
             return False
-    
+
     async def run_cycle(self):
         """Execute one broadcast cycle across all accounts and groups"""
         if not self.running or not self.target_groups:
             return False
-            
+
         # Check global flood cooldown
         campaign = await db.campaigns.find_one({"user_id": self.user_id})
         if campaign and campaign.get("flood_cooldown_until"):
             if datetime.now(timezone.utc) < campaign["flood_cooldown_until"]:
                 logger.info("Global flood cooldown active. Skipping cycle.")
                 return True
-        
+
         # Rotate through target groups
         for group in self.target_groups:
             if not self.running:
                 break
-                
+
             # Get next available account (skip those in flood cooldown)
             client = await self._get_next_account()
             if not client:
                 logger.warning("No available accounts for broadcasting")
                 break
-            
+
             # Check account-specific flood cooldown
             phone = next(p for p, c in self.active_sessions.items() if c == client)
-            account = await db.accounts.find_one({"user_id": self.user_id, "phone": phone})
-            if account and account.get("flood_cooldown_until"):
+            account = await db.accounts.find_one({"user_id": self.user_id, "phone": phone})            if account and account.get("flood_cooldown_until"):
                 if datetime.now(timezone.utc) < account["flood_cooldown_until"]:
                     continue  # Skip this account
-            
+
             # Send message with anti-flood protection
             success = await self._safe_send(client, group)
-            
+
             # Enforce safe delay between messages (per Telegram guidelines)
             await asyncio.sleep(max(self.delay, MIN_DELAY))
-        
+
         return self.running
-    
+
     async def stop(self):
         """Gracefully stop broadcast and cleanup resources"""
         self.running = False
-        
+
         # Disconnect all clients
         for phone, client in self.active_sessions.items():
             try:
                 await client.disconnect()
                 logger.info(f"Disconnected session for {phone}")
             except Exception as e:
-                logger.error(f"Error disconnecting {phone}: {e}")
-        
-        self.active_sessions.clear()
-        logger.info(f"Broadcast stopped for user {self.user_id}")
+                logger.error(f"Failed to disconnect {phone}: {e}")
 
-# --- BACKGROUND TASK SCHEDULER ---
-async def broadcast_scheduler(user_id: int):
-    """Background task that manages broadcast cycles"""
-    engine = BroadcastEngine(user_id)
-    
-    try:
-        if not await engine.initialize():
-            logger.error(f"Broadcast initialization failed for user {user_id}")
-            await db.campaigns.update_one(
-                {"user_id": user_id},
-                {"$set": {
-                    "status": "stopped",
-                    "stopped_at": datetime.now(timezone.utc),
-                    "error": "Initialization failed - check accounts and ad message"
-                }},
-                upsert=True
-            )
-            return
+        self.active_sessions.clear()
+
+    async def get_stats(self) -> dict:
+        """Get current broadcast statistics"""
+        campaigns = await db.campaigns.find_one({"user_id": self.user_id}) or {}
+        total_sent = campaigns.get("messages_sent", 0)
+        total_failed = campaigns.get("messages_failed", 0)
         
-        # Update campaign status
-        await db.campaigns.update_one(
-            {"user_id": user_id},
-            {"$set": {
-                "status": "running",
-                "started_at": datetime.now(timezone.utc),
-                "messages_sent": 0,
-                "messages_failed": 0
-            }},
-            upsert=True
-        )
+        total_broadcasts = total_sent + total_failed
+        success_rate = (total_sent / total_broadcasts * 100) if total_broadcasts > 0 else 0
         
-        logger.info(f"Broadcast started for user {user_id}")
-        
-        # Main broadcast loop
-        while engine.running:
-            cycle_success = await engine.run_cycle()
-            
-            if not cycle_success:
-                logger.warning(f"Broadcast cycle failed for user {user_id}. Stopping.")
-                break
-            
-            # Check if campaign was stopped externally
-            campaign = await db.campaigns.find_one({"user_id": user_id})
-            if not campaign or campaign.get("status") != "running":
-                logger.info(f"Broadcast stopped externally for user {user_id}")
-                break
-            
-            # Respect minimum delay between cycles
-            await asyncio.sleep(max(engine.delay, MIN_DELAY))
-            
-    except asyncio.CancelledError:
-        logger.info(f"Broadcast task cancelled for user {user_id}")
-    except Exception as e:
-        logger.exception(f"Critical error in broadcast for user {user_id}: {e}")
-    finally:
-        await engine.stop()
-        
-        # Update final campaign status
-        await db.campaigns.update_one(
-            {"user_id": user_id},
-            {"$set": {
-                "status": "stopped",
-                "stopped_at": datetime.now(timezone.utc),
-                "final_stats": {
-                    "messages_sent": engine.sent_count,
-                    "messages_failed": engine.failed_count
-                }
-            }},
-            upsert=True
-        )
-        
-        # Cleanup task reference
-        if user_id in campaign_tasks:
-            del campaign_tasks[user_id]
-        
-        logger.info(f"Broadcast cleanup completed for user {user_id}")
+        return {
+            "broadcast_cycles_completed": campaigns.get("cycles_completed", 0),
+            "messages_sent": total_sent,
+            "failed_sends": total_failed,
+            "logger_failures": campaigns.get("logger_failures", 0),
+            "active_accounts": len(self.active_sessions),
+            "avg_delay": self.delay,
+            "success_rate": success_rate
+        }
 
 # --- HANDLERS ---
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = ("✨ Welcome to Adimyze Pro — Professional Telegram Marketing Automation\n\n"
-            "✅ Premium Ad Broadcasting\n"
-            "✅ Smart Anti-Flood Protection\n"
-            "✅ Multi-Account Rotation\n"
-            "✅ Background Task Scheduling\n\n"
-            "⚠️ Use responsibly: Aggressive settings may risk account suspension\n"
-            "🛠️ Support: @nexaxoders")
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    welcome_text = (        "╰_╯ @NexaCoders Ads DASHBOARD\n\n"
+        "•Hosted Accounts: 0/5\n"
+        "•Ad Message: Not Set ❌\n"
+        "•Cycle Interval: 300s\n"
+        "•Advertising Status: Stopped ⏹️\n\n"
+        "╰_╯Choose an action below to continue"
+    )
+    
+    # Check if user has ad message
+    ad_doc = await db.ads.find_one({"user_id": str(user_id)})
+    if ad_doc and ad_doc.get("text"):
+        welcome_text = welcome_text.replace("•Ad Message: Not Set ❌", "•Ad Message: Set ✅")
+    
+    # Check if campaign is running
+    campaign = await db.campaigns.find_one({"user_id": user_id, "status": "running"})
+    if campaign:
+        welcome_text = welcome_text.replace("•Advertising Status: Stopped ⏹️", "•Advertising Status: Running ▶️")
+    
+    # Count active accounts
+    accounts = await db.accounts.count_documents({"user_id": user_id, "active": True})
+    welcome_text = welcome_text.replace("•Hosted Accounts: 0/5", f"•Hosted Accounts: {accounts}/5")
+    
+    await update.message.reply_text(welcome_text, reply_markup=kb_start())
 
-    if update.callback_query:
-        query = update.callback_query
-        await query.answer()
-        await query.message.reply_photo(
-            photo=BANNER_URL,
-            caption=text,
-            reply_markup=kb_start()
-        )
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-    else:
-        await update.message.reply_photo(
-            photo=BANNER_URL,
-            caption=text,
-            reply_markup=kb_start()
-        )
-
-async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    parts = query.data.split("|")
-    dest = parts[1]
+    
     user_id = query.from_user.id
-
-    if dest == "start":
-        await cmd_start(update, context)
-
-    elif dest == "dashboard":
-        text = ("✨ Nexa Ads DASHBOARD\n\n"
-                "Manage your professional ad campaigns:")
-        await safe_edit_or_send(query, text, kb_dashboard(user_id))
-
-    elif dest == "howto":
-        text = ("📘 HOW TO USE ADIMYZE PRO\n\n"
-                "1️⃣ Add Accounts → Host your Telegram accounts securely\n"
-                "2️⃣ Set Ad Message → Create compelling promotional content\n"
-                "3️⃣ Configure Interval → Set safe broadcasting frequency (10+ min recommended)\n"
-                "4️⃣ Start Broadcast → Launch automated campaign\n\n"
-                "⚠️ CRITICAL SAFETY NOTES:\n"
-                "• Never use intervals below 5 minutes\n"
-                "• Max 15 messages/hour per account\n"
-                "• Always manually join target groups first\n"
-                "• Rotate multiple accounts to avoid detection\n\n"
-                "Responsible usage ensures account longevity!")
-        await safe_edit_or_send(
-            query,
-            text,
-            InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")]])
-        )
-
-async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    parts = query.data.split("|")
-    action = parts[1]
-    user_id = query.from_user.id
-
-    if action == "add":
-        user_states[user_id] = UserState(step="phone")
-        text = ("📱 HOST NEW ACCOUNT\n\n"
-                "🔒 Secure Account Hosting\n\n"
-                "Enter your phone number with country code:\n"
-                "Example: +1234567890\n\n"
-                "⚠️ Your session is encrypted and never shared")
-        await query.message.reply_text(
-            text,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="nav|dashboard")]])
-        )
-
-    elif action == "list":
-        page = int(parts[2])
-        accounts = await db.accounts.find({"user_id": user_id}).to_list(None)
-
-        if not accounts:
-            await query.answer("📭 No accounts added yet!", show_alert=True)
-            text = "📱 MY ACCOUNTS\n\nYou haven't added any accounts yet."
-            await safe_edit_or_send(query, text, kb_dashboard(user_id))
-            return
-
-        text = f"📱 MY ACCOUNTS ({len(accounts)})\n\nSelect an account to manage:"
-        await safe_edit_or_send(query, text, kb_accounts(accounts, page))
-
-    elif action == "detail":
-        acc_id = parts[2]
-        account = await db.accounts.find_one({"_id": acc_id, "user_id": user_id})
-        if not account:
-            await query.answer("❌ Account not found!", show_alert=True)
-            return
-
-        status = "🟢 Active" if account.get("active") else "🔴 Inactive"
-        phone = account["phone"]
-        last_used = account.get("last_used", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M")
-        text = (f"📱 ACCOUNT DETAILS\n\n"
-                f"Phone: {phone}\n"
-                f"Status: {status}\n"
-                f"Last Used: {last_used}")
-        await safe_edit_or_send(query, text, kb_account_detail(acc_id, phone))
-
-    elif action == "delete":
-        acc_id = parts[2]
-        account = await db.accounts.find_one({"_id": acc_id, "user_id": user_id})
-        if not account:
-            await query.answer("❌ Account not found!", show_alert=True)
-            return
-
-        phone = account["phone"]
-        text = f"⚠️ DELETE ACCOUNT\n\nAre you sure you want to permanently delete:\n{phone}?"
-        await safe_edit_or_send(query, text, kb_confirm_delete(acc_id))
-
-    elif action == "confirm_del":
-        acc_id = parts[2]
-        result = await db.accounts.delete_one({"_id": acc_id, "user_id": user_id})
+    data = query.data
+    
+    if data.startswith("nav|"):
+        nav_action = data.split("|")[1]
+        if nav_action == "dashboard":
+            # Get dashboard info
+            accounts_count = await db.accounts.count_documents({"user_id": user_id, "active": True})
+            
+            # Check ad message
+            ad_doc = await db.ads.find_one({"user_id": str(user_id)})
+            ad_status = "Set ✅" if ad_doc and ad_doc.get("text") else "Not Set ❌"
+            
+            # Check campaign status
+            campaign = await db.campaigns.find_one({"user_id": user_id})
+            if campaign and campaign.get("status") == "running":
+                status = "Running ▶️"
+            elif campaign and campaign.get("status") == "paused":
+                status = "Paused ⏸️"
+            else:
+                status = "Stopped ⏹️"
+                            delay = campaign.get("delay", 300) if campaign else 300
+            
+            dashboard_text = (
+                "╰_╯ @NexaCoders Ads DASHBOARD\n\n"
+                f"•Hosted Accounts: {accounts_count}/5\n"
+                f"•Ad Message: {ad_status}\n"
+                f"•Cycle Interval: {delay}s\n"
+                f"•Advertising Status: {status}\n\n"
+                "╰_╯Choose an action below to continue"
+            )
+            
+            await safe_edit_or_send(query, dashboard_text, reply_markup=kb_dashboard(user_id))
+            
+        elif nav_action == "start":
+            welcome_text = (
+                "╰_╯ @NexaCoders Ads DASHBOARD\n\n"
+                "•Hosted Accounts: 0/5\n"
+                "•Ad Message: Not Set ❌\n"
+                "•Cycle Interval: 300s\n"
+                "•Advertising Status: Stopped ⏹️\n\n"
+                "╰_╯Choose an action below to continue"
+            )
+            
+            # Check if user has ad message
+            ad_doc = await db.ads.find_one({"user_id": str(user_id)})
+            if ad_doc and ad_doc.get("text"):
+                welcome_text = welcome_text.replace("•Ad Message: Not Set ❌", "•Ad Message: Set ✅")
+            
+            # Check if campaign is running
+            campaign = await db.campaigns.find_one({"user_id": user_id, "status": "running"})
+            if campaign:
+                welcome_text = welcome_text.replace("•Advertising Status: Stopped ⏹️", "•Advertising Status: Running ▶️")
+            
+            # Count active accounts
+            accounts = await db.accounts.count_documents({"user_id": user_id, "active": True})
+            welcome_text = welcome_text.replace("•Hosted Accounts: 0/5", f"•Hosted Accounts: {accounts}/5")
+            
+            await safe_edit_or_send(query, welcome_text, reply_markup=kb_start())
+    
+    elif data.startswith("acc|"):
+        action_parts = data.split("|")
+        action = action_parts[1]
         
-        # Stop any active campaigns using this account
-        if user_id in campaign_tasks:
-            task = campaign_tasks[user_id]
-            if task.status == CampaignStatus.RUNNING:
-                task.task.cancel()
-                del campaign_tasks[user_id]
+        if action == "add":
+            await safe_edit_or_send(
+                query, 
+                "╰_╯HOST NEW ACCOUNT\n\n"
+                "Secure Account Hosting\n\n"
+                "Enter your phone number with country code:\n\n"
+                "Example: +1234567890\n\n"                "Your data is encrypted and secure",
+                reply_markup=None
+            )
+            user_states[user_id] = UserState(step="waiting_phone")
         
-        if result.deleted_count:
-            await query.answer("✅ Account deleted successfully!", show_alert=True)
-        else:
-            await query.answer("❌ Failed to delete account!", show_alert=True)
+        elif action == "list":
+            page = int(action_parts[2]) if len(action_parts) > 2 else 0
+            accounts = await db.accounts.find({"user_id": user_id}).to_list(None)
+            await safe_edit_or_send(
+                query,
+                f"Your Accounts ({len(accounts)} total):",
+                reply_markup=kb_accounts(accounts, page)
+            )
         
-        text = "✨ Nexa Ads DASHBOARD\n\nManage your professional ad campaigns:"
-        await safe_edit_or_send(query, text, kb_dashboard(user_id))
+        elif action == "del":
+            accounts = await db.accounts.find({"user_id": user_id}).to_list(None)
+            if not accounts:
+                await safe_edit_or_send(query, "No accounts to delete!", reply_markup=kb_dashboard(user_id))
+            else:
+                await safe_edit_or_send(
+                    query,
+                    f"Select account to delete ({len(accounts)} available):",
+                    reply_markup=kb_accounts(accounts, 0)
+                )
+    
+    elif data.startswith("otp|"):
+        action = data.split("|")[1]
+        
+        if action == "cancel":
+            await safe_edit_or_send(query, "Process Cancelled.", reply_markup=kb_dashboard(user_id))
+            if user_id in user_states:
+                del user_states[user_id]
+        
+        elif action == "back":
+            state = user_states.get(user_id)
+            if state and len(state.buffer) > 0:
+                state.buffer = state.buffer[:-1]
+                await safe_edit_or_send(query.message.text, reply_markup=kb_otp(user_id))
+        
+        elif action.isdigit():
+            state = user_states.get(user_id)
+            if state and len(state.buffer) < 5:
+                state.buffer += action
+                await safe_edit_or_send(query.message.text, reply_markup=kb_otp(user_id))
+                
+                # If OTP is complete
+                if len(state.buffer) == 5:
+                    await safe_edit_or_send(
+                        query,
+                        "Verifying OTP...",                        reply_markup=None
+                    )
+                    
+                    try:
+                        # Verify OTP
+                        await state.client.sign_in(state.phone, state.buffer)
+                        
+                        # Save session
+                        session_string = state.client.session.save()
+                        
+                        # Save to database
+                        await db.accounts.insert_one({
+                            "user_id": user_id,
+                            "phone": state.phone,
+                            "session": session_string,
+                            "active": True,
+                            "added_at": datetime.now(timezone.utc)
+                        })
+                        
+                        # Update profile
+                        await state.client(UpdateProfileRequest(
+                            first_name=PROFILE_NAME,
+                            about=PROFILE_BIO
+                        ))
+                        
+                        await state.client.disconnect()
+                        
+                        await safe_edit_or_send(
+                            query,
+                            "Account Successfully added!✅\n\n"
+                            f"Phone: {state.phone}\n"
+                            "╰_╯Your account is ready for broadcasting!\n"
+                            "Note: Profile bio and name will be updated during the first broadcast, you change it if you want.",
+                            reply_markup=InlineKeyboardMarkup([
+                                [InlineKeyboardButton("[ Dashboard ]", callback_data="nav|dashboard")]
+                            ])
+                        )
+                        
+                        del user_states[user_id]
+                        
+                    except PhoneCodeInvalidError:
+                        state.buffer = ""
+                        await safe_edit_or_send(
+                            query,
+                            "Invalid OTP. Please try again.",
+                            reply_markup=kb_otp(user_id)
+                        )
+                    except Exception as e:
+                        logger.error(f"OTP verification failed: {e}")
+                        await safe_edit_or_send(                            query,
+                            f"Verification failed: {str(e)}",
+                            reply_markup=kb_otp(user_id)
+                        )
+    
+    elif data.startswith("ad|"):
+        action = data.split("|")[1]
+        
+        if action == "set":
+            # Get current ad message
+            ad_doc = await db.ads.find_one({"user_id": str(user_id)})
+            current_msg = ad_doc["text"] if ad_doc and ad_doc.get("text") else ""
+            
+            if current_msg:
+                msg_text = (
+                    "╰_╯ SET YOUR AD MESSAGE\n\n"
+                    f"Current Ad Message: {current_msg}\n\n"
+                    "Tips for effective ads:\n"
+                    "•Keep it concise and engaging\n"
+                    "•Use premium emojis for flair\n"
+                    "•Include clear call-to-action\n"
+                    "•Avoid excessive caps or spam words\n\n"
+                    "Send your ad message now:"
+                )
+            else:
+                msg_text = (
+                    "╰_╯ SET YOUR AD MESSAGE\n\n"
+                    "Tips for effective ads:\n"
+                    "•Keep it concise and engaging\n"
+                    "•Use premium emojis for flair\n"
+                    "•Include clear call-to-action\n"
+                    "•Avoid excessive caps or spam words\n\n"
+                    "Send your ad message now:"
+                )
+            
+            await safe_edit_or_send(query, msg_text, reply_markup=kb_ad_message(current_msg))
+            user_states[user_id] = UserState(step="waiting_ad_message")
+    
+    elif data.startswith("stat|"):
+        action = data.split("|")[1]
+        
+        if action == "main":
+            # Get analytics data
+            accounts_count = await db.accounts.count_documents({"user_id": user_id, "active": True})
+            
+            # Get campaign stats
+            campaign = await db.campaigns.find_one({"user_id": user_id}) or {}
+            cycles_completed = campaign.get("cycles_completed", 0)
+            messages_sent = campaign.get("messages_sent", 0)
+            failed_sends = campaign.get("messages_failed", 0)            logger_failures = campaign.get("logger_failures", 0)
+            avg_delay = campaign.get("delay", 300)
+            
+            total_messages = messages_sent + failed_sends
+            success_rate = (messages_sent / total_messages * 100) if total_messages > 0 else 0
+            
+            analytics_text = (
+                "╰_╯@Tecxo ANALYTICS\n\n"
+                f"Broadcast Cycles Completed: {cycles_completed}\n"
+                f"Messages Sent: {messages_sent}\n"
+                f"Failed Sends: {failed_sends}\n"
+                f"Logger Failures: {logger_failures}\n"
+                f"Active Accounts: {accounts_count}\n"
+                f"Avg Delay: {avg_delay}s\n\n"
+                f"Success Rate: {'▓' * int(success_rate/10)}{'░' * (10-int(success_rate/10))} {int(success_rate)}%"
+            )
+            
+            await safe_edit_or_send(query, analytics_text, reply_markup=kb_analytics_main())
+        
+        elif action == "detail":
+            # Get detailed report
+            accounts_count = await db.accounts.count_documents({"user_id": user_id})
+            active_accounts = await db.accounts.count_documents({"user_id": user_id, "active": True})
+            inactive_accounts = accounts_count - active_accounts
+            
+            # Get campaign stats
+            campaign = await db.campaigns.find_one({"user_id": user_id}) or {}
+            total_sent = campaign.get("messages_sent", 0)
+            total_failed = campaign.get("messages_failed", 0)
+            total_broadcasts = total_sent + total_failed
+            avg_delay = campaign.get("delay", 300)
+            
+            # Get current date
+            current_date = datetime.now().strftime("%d/%m/%y")
+            
+            detail_text = (
+                "╰_╯ DETAILED ANALYTICS REPORT:\n\n"
+                f"Date: {current_date}\n"
+                f"User ID: {user_id}\n\n"
+                "Broadcast Stats:\n"
+                f"- Total Sent: {total_sent}\n"
+                f"- Total Failed: {total_failed}\n"
+                f"- Total Broadcasts: {total_broadcasts}\n\n"
+                "Logger Stats:\n"
+                f"- Logger Failures: {campaign.get('logger_failures', 0)}\n"
+                f"- Last Failure: {campaign.get('last_failure', 'None')}\n\n"
+                "Account Stats:\n"
+                f"- Total Accounts: {accounts_count}\n"
+                f"- Active Accounts: {active_accounts} 🟢\n"
+                f"- Inactive Accounts: {inactive_accounts} 🔴\n\n"                f"Current Delay: {avg_delay}s"
+            )
+            
+            await safe_edit_or_send(query, detail_text, reply_markup=kb_detailed_report())
 
-    elif action == "del":
-        count = await db.accounts.count_documents({"user_id": user_id})
-        if count == 0:
-            await query.answer("📭 No accounts to delete!", show_alert=True)
-            return
-        text = "🗑️ DELETE ACCOUNTS\n\nSelect accounts to remove from your campaign:"
-        await safe_edit_or_send(
-            query,
-            text,
-            InlineKeyboardMarkup([
-                [InlineKeyboardButton("View & Delete Accounts", callback_data="acc|list|0")],
-                [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
-            ])
-        )
-
-async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     state = user_states.get(user_id)
-    if not state or state.step == "idle":
-        return
-
-    text = update.message.text.strip()
-
-    try:
-        if state.step == "phone":
-            phone = "+" + re.sub(r"\D", "", text)
-            if len(phone) < 8 or len(phone) > 15:
-                await update.message.reply_text(
-                    "❌ Invalid phone number!\n\nPlease enter a valid number with country code (e.g., +1234567890):",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="nav|dashboard")]])
-                )
-                return
-
-            client = TelegramClient(StringSession(), API_ID, API_HASH)
-            await client.connect()
-
-            try:
-                sent = await client.send_code_request(phone)
-                state.client = client
-                state.phone = phone
-                state.phone_code_hash = sent.phone_code_hash
-                state.step = "code"
-                state.buffer = ""
-
-                await update.message.reply_text(
-                    f"📱 OTP sent to {phone}!\n\n"
-                    f"Enter the 5-digit code using the keypad below:",
-                    reply_markup=kb_otp(user_id)
-                )
-            except Exception as e:
-                await client.disconnect()
-                error = str(e)
-                if "FLOOD_WAIT" in error:
-                    match = re.search(r'FLOOD_WAIT_(\d+)', error)
-                    msg = f"⏳ Too many requests! Wait {match.group(1)} seconds before trying again." if match else "⏳ Too many requests! Please try again later."
-                elif "INVALID_PHONE_NUMBER" in error:
-                    msg = "❌ Invalid phone number format!"
-                else:
-                    msg = f"❌ Error: {error[:100]}"
-
-                await update.message.reply_text(
-                    f"{msg}\n\nPlease try again:",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")]])
-                )
-
-        elif state.step == "password":
-            if state.password_retry >= 3:
-                await update.message.reply_text(
-                    "❌ Too many failed attempts. Please restart the login process.",
-                    reply_markup=kb_dashboard(user_id)
-                )
-                user_states[user_id] = UserState(step="idle")
-                return
-                
-            state.password_retry += 1
-            await finalize_login(user_id, context, password=text)
-
-        elif state.step == "set_ad":
-            if len(text) > 4000:
-                await update.message.reply_text(
-                    "❌ Message too long! (Max 4000 characters)\n\nPlease send a shorter ad message:",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")]])
-                )
-                return
-
-            await db.ads.update_one(
-                {"user_id": str(user_id)},
-                {"$set": {"text": text, "updated_at": datetime.now(timezone.utc)}},
-                upsert=True
-            )
-            user_states[user_id] = UserState(step="idle")
+    
+    if state and state.step == "waiting_phone":
+        phone_number = update.message.text.strip()
+        
+        # Validate phone number format
+        if not re.match(r'^\+\d{10,15}$', phone_number):
             await update.message.reply_text(
-                "✅ Ad Message Saved Successfully!",
-                reply_markup=kb_dashboard(user_id)
+                "Invalid phone number format. Please enter with country code (e.g., +1234567890)"
             )
-
-    except Exception as e:
-        logger.exception(f"Input handler error for user {user_id}: {e}")
-        await update.message.reply_text(
-            "❌ Unexpected error occurred!\n\nPlease restart the process or contact support.",
-            reply_markup=kb_dashboard(user_id)
-        )
-        if state and state.client:
-            await state.client.disconnect()
-        user_states[user_id] = UserState(step="idle")
-
-async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    state = user_states.get(user_id)
-
-    if not state or state.step != "code":
-        await query.answer("	Session expired! Please restart login.", show_alert=True)
-        return
-
-    await query.answer()
-    action = query.data.split("|")[1]
-    error = ""
-
-    if action == "back":
-        state.buffer = state.buffer[:-1]
-    elif action == "cancel":
-        if state.client:
-            await state.client.disconnect()
-        user_states[user_id] = UserState(step="idle")
-        await query.message.edit_text(
-            "❌ Login cancelled successfully.",
-            reply_markup=kb_dashboard(user_id)
-        )
-        return
-    elif action == "resend":
+            return
+        
+        # Create Telethon client
+        client = TelegramClient(StringSession(""), API_ID, API_HASH)
+        await client.connect()
+        
         try:
-            if state.client:
-                await state.client.send_code_request(state.phone)
-                error = "New code sent! Check Telegram messages."
-        except Exception as e:
-            error = f"Resend failed: {str(e)[:50]}"
-    elif action.isdigit():
-        if len(state.buffer) < 5:
-            state.buffer += action
-            # Auto-submit when 5 digits entered
-            if len(state.buffer) == 5:
-                await finalize_login(user_id, context)
-                return
+            # Send OTP
+            sent_code = await client.send_code_request(phone_number)
+            
+            # Store state
+            state.phone = phone_number
+            state.phone_code_hash = sent_code.phone_code_hash
+            state.client = client
+            state.step = "waiting_otp"
+            state.buffer = ""
+            
+            # Show OTP interface
+            otp_text = (
+                f"⏳ Hold! We're trying to OTP...\n\n"
+                f"Phone: {phone_number}\n"
+                "Please wait a moment.\n\n"
+                f"Fir\n\n"
+                f"3 row ka ho\n\n"
+                f"╰_╯ OTP sent to {phone_number}! ✅\n\n"
+                "Enter the OTP using the keypad below\n"
+                "Current: * * * * *\n"
+                "Format: 12345 (no spaces needed)\n"
+                "Valid for: 5 minutes"
+            )
+            
+            await update.message.reply_text(otp_text, reply_markup=kb_otp(user_id))
+                    except Exception as e:
+            await client.disconnect()
+            await update.message.reply_text(f"Error sending OTP: {str(e)}")
     
-    # Update OTP display
-    try:
-        await query.edit_message_text(
-            f"📱 Enter OTP for {state.phone}\n\n"
-            f"Code received from Telegram (5 digits):",
-            reply_markup=kb_otp(user_id, error)
-        )
-    except BadRequest:
-        pass
-
-async def finalize_login(user_id: int, context: ContextTypes.DEFAULT_TYPE, password: Optional[str] = None):
-    state = user_states.get(user_id)
-    if not state or not state.client:
-        await context.bot.send_message(
-            user_id,
-            "❌ Session expired! Please restart the login process.",
-            reply_markup=kb_dashboard(user_id)
-        )
-        return
-
-    try:
-        if password:
-            await state.client.sign_in(password=password)
-            state.password_retry = 0  # Reset on success
-        else:
-            await state.client.sign_in(
-                phone=state.phone,
-                code=state.buffer,
-                phone_code_hash=state.phone_code_hash
-            )
-
-        # Update profile immediately after login
-        try:
-            await state.client(UpdateProfileRequest(
-                first_name=PROFILE_NAME,
-                about=PROFILE_BIO
-            ))
-        except Exception as e:
-            logger.warning(f"Profile update warning for {state.phone}: {e}")
-
-        # Save session
-        session = state.client.session.save()
-        await db.accounts.update_one(
-            {"user_id": user_id, "phone": state.phone},
-            {"$set": {
-                "session": session,
-                "active": True,
-                "created_at": datetime.now(timezone.utc),
-                "last_used": datetime.now(timezone.utc)
-            }},
-            upsert=True
-        )
-
-        await state.client.disconnect()
-        user_states[user_id] = UserState(step="idle")
-
-        success_msg = (f"✅ Account Successfully Added!\n\n"
-                      f"📱 Phone: {state.phone}\n"
-                      f"✨ Status: Ready for broadcasting\n\n"
-                      f"⚠️ Profile updated with professional branding\n"
-                      f"🔒 Session encrypted and stored securely")
-        await context.bot.send_message(
-            user_id,
-            success_msg,
-            reply_markup=kb_dashboard(user_id)
-        )
-
-    except SessionPasswordNeededError:
-        state.step = "password"
-        await context.bot.send_message(
-            user_id,
-            "🔐 Two-Step Verification Detected\n\nPlease enter your Telegram cloud password:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")]])
-        )
-    except (PhoneCodeInvalidError, ValueError):
-        state.buffer = ""
-        await query.answer("❌ Invalid OTP code!", show_alert=True)
-        # Keep session alive for retry
-    except Exception as e:
-        error_msg = str(e)
-        if "PHONE_CODE_EXPIRED" in error_msg:
-            error_msg = "OTP expired! Please request a new code."
-        elif "SESSION_REVOKED" in error_msg:
-            error_msg = "Session revoked by Telegram. Please log in again."
-        elif "FLOOD_WAIT" in error_msg:
-            match = re.search(r'FLOOD_WAIT_(\d+)', error_msg)
-            if match:
-                error_msg = f"Too many attempts! Please wait {match.group(1)} seconds before trying again."
-            else:
-                error_msg = "Too many attempts! Please try again later."
-
-        await state.client.disconnect()
-        user_states[user_id] = UserState(step="idle")
-        await context.bot.send_message(
-            user_id,
-            f"❌ Login Failed: {error_msg}",
-            reply_markup=kb_dashboard(user_id)
-        )
-        logger.exception(f"Login failed for {state.phone}: {e}")
-
-async def handle_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    if query.data == "ad|set":
-        text = ("✍️ SET YOUR AD MESSAGE\n\n"
-                "✨ Pro Tips for High-Converting Ads:\n"
-                "• Keep it concise (under 200 chars ideal)\n"
-                "• Use 2-3 relevant emojis max\n"
-                "• Include clear call-to-action\n"
-                "• Avoid spam triggers (!!!, $$$, FREE)\n"
-                "• Personalize for your audience\n\n"
-                "⚠️ Max 4000 characters\n\n"
-                "Send your ad message now:")
-        user_states[query.from_user.id] = UserState(step="set_ad")
-        await query.message.reply_text(
-            text,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")]])
-        )
-
-async def handle_delay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    parts = query.data.split("|")
-
-    if parts[0] == "delay" and parts[1] == "nav":
-        user_doc = await db.users.find_one({"user_id": str(user_id)})
-        current_delay = user_doc.get("delay", MIN_DELAY) if user_doc else MIN_DELAY
-
-        text = (f"⏱️ SET BROADCAST INTERVAL\n\n"
-               f"Current Interval: {current_delay}s ({current_delay//60} min)\n\n"
-               f"⚠️ SAFETY RECOMMENDATIONS:\n"
-               f"• 🔴 300s (5 min) - HIGH RISK ⚠️\n"
-               f"• 🟡 600s (10 min) - RECOMMENDED ✅\n"
-               f"• 🟢 1200s (20 min) - SAFEST 🔒\n\n"
-               f"❗ Using intervals below 5 minutes significantly increases ban risk")
-        await safe_edit_or_send(query, text, kb_delay(current_delay))
-
-    elif parts[0] == "setdelay":
-        delay = int(parts[1])
+    elif state and state.step == "waiting_ad_message":
+        ad_message = update.message.text
         
-        # Enforce minimum safe delay
-        if delay < MIN_DELAY:
-            await query.answer(f"⚠️ Minimum safe interval is {MIN_DELAY}s ({MIN_DELAY//60} min)", show_alert=True)
-            delay = MIN_DELAY
-        
-        await db.users.update_one(
+        # Save ad message to database
+        await db.ads.update_one(
             {"user_id": str(user_id)},
-            {"$set": {"delay": delay, "updated_at": datetime.now(timezone.utc)}},
-            upsert=True
-        )
-        await query.answer(f"✅ Interval set to {delay}s ({delay//60} min)", show_alert=True)
-
-        text = (f"⏱️ SET BROADCAST INTERVAL\n\n"
-               f"Current Interval: {delay}s ({delay//60} min)\n\n"
-               f"⚠️ SAFETY RECOMMENDATIONS:\n"
-               f"• 🔴 300s (5 min) - HIGH RISK ⚠️\n"
-               f"• 🟡 600s (10 min) - RECOMMENDED ✅\n"
-               f"• 🟢 1200s (20 min) - SAFEST 🔒\n\n"
-               f"❗ Using intervals below 5 minutes significantly increases ban risk")
-        await safe_edit_or_send(query, text, kb_delay(delay))
-
-async def handle_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    parts = query.data.split("|")
-
-    if parts[1] == "main":
-        active = await db.accounts.count_documents({"user_id": user_id, "active": True})
-        total = await db.accounts.count_documents({"user_id": user_id})
-        user_doc = await db.users.find_one({"user_id": str(user_id)})
-        delay = user_doc.get("delay", MIN_DELAY) if user_doc else MIN_DELAY
-        
-        # Get campaign stats
-        campaign = await db.campaigns.find_one({"user_id": user_id, "status": "running"})
-        if campaign:
-            sent = campaign.get("messages_sent", 0)
-            failed = campaign.get("messages_failed", 0)
-            status = "▶️ Running"
-        else:
-            # Get last campaign stats
-            last_campaign = await db.campaigns.find_one(
-                {"user_id": user_id}, 
-                sort=[("stopped_at", -1)]
-            )
-            sent = last_campaign.get("final_stats", {}).get("messages_sent", 0) if last_campaign else 0
-            failed = last_campaign.get("final_stats", {}).get("messages_failed", 0) if last_campaign else 0
-            status = "⏹️ Stopped" if last_campaign else "📭 No Campaigns"
-        
-        total_attempts = sent + failed
-        success_rate = int((sent / total_attempts * 100)) if total_attempts > 0 else 0
-        bar = "▓" * (success_rate // 10) + "░" * (10 - success_rate // 10)
-
-        text = (f"📊 ADIMYZE PRO ANALYTICS\n\n"
-               f"Status: {status}\n"
-               f"Active Accounts: {active}/{total}\n"
-               f"Current Interval: {delay}s\n\n"
-               f"Messages Sent: {sent}\n"
-               f"Failed Sends: {failed}\n"
-               f"Success Rate: {bar} {success_rate}%\n\n"
-               f"⚠️ Safety Score: {'🟢 Excellent' if delay >= 600 else '🟡 Moderate' if delay >= 300 else '🔴 Risky'}")
-
-        await safe_edit_or_send(
-            query,
-            text,
-            InlineKeyboardMarkup([
-                [InlineKeyboardButton("📈 Detailed Report", callback_data="stat|detail")],
-                [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")]
-            ])
-        )
-
-    elif parts[1] == "detail":
-        active = await db.accounts.count_documents({"user_id": user_id, "active": True})
-        total = await db.accounts.count_documents({"user_id": user_id})
-        inactive = total - active
-        user_doc = await db.users.find_one({"user_id": str(user_id)})
-        delay = user_doc.get("delay", MIN_DELAY) if user_doc else MIN_DELAY
-
-        now = datetime.now(timezone.utc).strftime("%d/%m/%y %H:%M")
-        campaign = await db.campaigns.find_one({"user_id": user_id, "status": "running"})
-        
-        if campaign:
-            sent = campaign.get("messages_sent", 0)
-            failed = campaign.get("messages_failed", 0)
-            runtime = datetime.now(timezone.utc) - campaign.get("started_at", datetime.now(timezone.utc))
-            runtime_str = f"{runtime.seconds//3600}h {(runtime.seconds//60)%60}m"
-        else:
-            sent, failed, runtime_str = 0, 0, "0m"
-
-        text = (f"📈 DETAILED ANALYTICS REPORT\n\n"
-               f"Generated: {now} UTC\n"
-               f"User ID: {user_id}\n\n"
-               f"📊 Campaign Stats:\n"
-               f"• Status: {'Running' if campaign else 'Stopped'}\n"
-               f"• Runtime: {runtime_str}\n"
-               f"• Messages Sent: {sent}\n"
-               f"• Failed Sends: {failed}\n"
-               f"• Success Rate: {int(sent/(sent+failed)*100) if (sent+failed) > 0 else 0}%\n\n"
-               f"👥 Account Stats:\n"
-               f"• Total Accounts: {total}\n"
-               f"• Active: {active} 🟢\n"
-               f"• Inactive: {inactive} 🔴\n\n"
-               f"⚙️ Configuration:\n"
-               f"• Broadcast Interval: {delay}s\n"
-               f"• Safety Level: {'Maximum' if delay >= 1200 else 'Recommended' if delay >= 600 else 'Aggressive'}")
-
-        await safe_edit_or_send(
-            query,
-            text,
-            InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Summary", callback_data="stat|main")]])
-        )
-
-async def handle_features(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    if "auto" in query.data:
-        text = ("🤖 AUTO REPLY FEATURE\n\n"
-               "This premium feature is under development!\n\n"
-               "Coming in v2.0:\n"
-               "• Keyword-triggered auto-replies\n"
-               "• Smart conversation routing\n"
-               "• Multi-language support\n"
-               "• Sentiment analysis\n\n"
-               "Stay tuned for the next update!")
-        await safe_edit_or_send(
-            query,
-            text,
-            InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="nav|dashboard")]])
-        )
-
-async def handle_campaigns(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-
-    if "start" in query.data or "pause" in query.data:
-        # Check if campaign is already running
-        if user_id in campaign_tasks and campaign_tasks[user_id].status == CampaignStatus.RUNNING:
-            if "pause" in query.data:
-                # Pause campaign
-                campaign_tasks[user_id].status = CampaignStatus.PAUSED
-                await db.campaigns.update_one(
-                    {"user_id": user_id},
-                    {"$set": {"status": "paused", "paused_at": datetime.now(timezone.utc)}}
-                )
-                await query.answer("⏸️ Campaign paused successfully!", show_alert=True)
-                text = ("⏸️ BROADCAST PAUSED\n\n"
-                       "Your campaign has been temporarily paused.\n"
-                       "You can resume anytime from the dashboard.")
-                await safe_edit_or_send(query, text, kb_dashboard(user_id))
-                return
-            else:
-                await query.answer("▶️ Campaign already running!", show_alert=True)
-                return
-        
-        # Validate prerequisites
-        accounts = await db.accounts.count_documents({"user_id": user_id, "active": True})
-        ad_doc = await db.ads.find_one({"user_id": str(user_id)})
-
-        if accounts == 0:
-            await query.answer("❌ No active accounts! Add accounts first.", show_alert=True)
-            return
-        if not ad_doc or not ad_doc.get("text"):
-            await query.answer("❌ No ad message set! Set your ad message first.", show_alert=True)
-            return
-        
-        # Check safety settings
-        user_doc = await db.users.find_one({"user_id": str(user_id)})
-        delay = user_doc.get("delay", MIN_DELAY) if user_doc else MIN_DELAY
-        
-        if delay < MIN_DELAY:
-            await query.answer(f"⚠️ Unsafe interval! Minimum {MIN_DELAY}s required for account safety.", show_alert=True)
-            return
-        
-        # Start new campaign task
-        task = asyncio.create_task(broadcast_scheduler(user_id))
-        campaign_tasks[user_id] = BroadcastTask(
-            task=task,
-            status=CampaignStatus.RUNNING,
-            active_accounts=[acc["phone"] async for acc in db.accounts.find({"user_id": user_id, "active": True})]
-        )
-        
-        # Create campaign record
-        await db.campaigns.update_one(
-            {"user_id": user_id},
-            {"$set": {
-                "status": "running",
-                "started_at": datetime.now(timezone.utc),
-                "messages_sent": 0,
-                "messages_failed": 0,
-                "interval": delay,
-                "active_accounts": campaign_tasks[user_id].active_accounts
-            }},
+            {"$set": {"text": ad_message, "updated_at": datetime.now(timezone.utc)}},
             upsert=True
         )
         
-        await query.answer("✅ Campaign started successfully!", show_alert=True)
-        text = (f"🚀 BROADCAST STARTED\n\n"
-               f"✅ {accounts} account(s) active\n"
-               f"⏱️ Interval: {delay}s ({delay//60} min)\n"
-               f"🛡️ Safety Level: {'Maximum' if delay >= 1200 else 'Recommended' if delay >= 600 else 'Aggressive'}\n\n"
-               f"📊 Monitor progress in Analytics section.\n"
-               f"⚠️ Do not close this bot while campaign is running!")
-        await safe_edit_or_send(
-            query,
-            text,
-            InlineKeyboardMarkup([
-                [InlineKeyboardButton("📊 View Analytics", callback_data="stat|main")],
-                [InlineKeyboardButton("⏹️ Stop Broadcast", callback_data="camp|stop")],
-                [InlineKeyboardButton("🏠 Dashboard", callback_data="nav|dashboard")]
-            ])
-        )
-
-    elif "stop" in query.data:
-        # Stop running campaign
-        if user_id in campaign_tasks:
-            task = campaign_tasks[user_id]
-            if task.status == CampaignStatus.RUNNING or task.status == CampaignStatus.PAUSED:
-                task.task.cancel()
-                task.status = CampaignStatus.STOPPED
-                await asyncio.sleep(0.5)  # Allow task to clean up
-                
-                # Update database
-                await db.campaigns.update_one(
-                    {"user_id": user_id},
-                    {"$set": {
-                        "status": "stopped",
-                        "stopped_at": datetime.now(timezone.utc)
-                    }}
-                )
-                
-                del campaign_tasks[user_id]
-                await query.answer("🛑 Campaign stopped successfully!", show_alert=True)
-            else:
-                await query.answer("📭 No active campaign to stop", show_alert=True)
-        else:
-            await query.answer("📭 No active campaign to stop", show_alert=True)
+        # Update user state
+        state.step = "idle"
         
-        text = ("⏹️ BROADCAST STOPPED\n\n"
-               "All broadcasting activities have been halted.\n"
-               "Campaign statistics have been saved.\n\n"
-               "You can restart anytime from the dashboard.")
-        await safe_edit_or_send(query, text, kb_dashboard(user_id))
+        # Show confirmation
+        confirm_text = (
+            "╰_╯ SET YOUR AD MESSAGE\n\n"
+            f"Current Ad Message: {ad_message}\n\n"
+            "Tips for effective ads:\n"
+            "•Keep it concise and engaging\n"
+            "•Use premium emojis for flair\n"
+            "•Include clear call-to-action\n"
+            "•Avoid excessive caps or spam words\n\n"
+            "Send your ad message now:"
+        )
+        
+        await update.message.reply_text(confirm_text, reply_markup=kb_ad_message(ad_message))
 
-async def handle_noop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle non-operational callbacks (display-only buttons)"""
-    if update.callback_query:
-        await update.callback_query.answer()
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(f"Update {update} caused error: {context.error}")
-
-async def post_init(application: Application):
-    logger.info("🚀 Adimyze Pro initialized successfully")
+def main():
+    application = Application.builder().token(BOT_TOKEN).build()
     
-    # Cleanup any orphaned campaigns on startup
-    await db.campaigns.update_many(
-        {"status": {"$in": ["running", "paused"]}},
-        {"$set": {"status": "stopped", "stopped_at": datetime.now(timezone.utc)}}
-    )
-    logger.info("🧹 Cleaned up orphaned campaigns")
-
-async def main():
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
-
-    # Handlers
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CallbackQueryHandler(handle_noop, pattern=r"^(otp_display|otp_error|noop)$"))
-    app.add_handler(CallbackQueryHandler(handle_otp, pattern=r"^otp\|"))
-    app.add_handler(CallbackQueryHandler(handle_account_ops, pattern=r"^acc\|"))
-    app.add_handler(CallbackQueryHandler(handle_ads, pattern=r"^ad\|"))
-    app.add_handler(CallbackQueryHandler(handle_delay, pattern=r"^(delay|setdelay)\|"))
-    app.add_handler(CallbackQueryHandler(handle_analytics, pattern=r"^stat\|"))
-    app.add_handler(CallbackQueryHandler(handle_features, pattern=r"^feature\|"))
-    app.add_handler(CallbackQueryHandler(handle_campaigns, pattern=r"^camp\|"))
-    app.add_handler(CallbackQueryHandler(handle_navigation, pattern=r"^nav\|"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, input_handler))
-    app.add_error_handler(error_handler)
-
-    logger.info("🚀 Starting Adimyze Pro Bot...")
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling(drop_pending_updates=True)
-    logger.info("✅ Adimyze Pro is running with all features enabled!")
-    logger.info(f"✨ Features: Real OTP UI | Broadcast Engine | Multi-Account | Anti-Flood | Background Scheduler")
-    await asyncio.Event().wait()
+    application.add_handler(CommandHandler("start", start_handler))
+    application.add_handler(CallbackQueryHandler(callback_query_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    
+    logger.info("Bot started...")
+    application.run_polling()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("🛑 Bot stopped by user")
-    except Exception as e:
-        logger.exception(f"_fatal error: {e}")
-        sys.exit(1)
+    main()
