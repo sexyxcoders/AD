@@ -509,7 +509,7 @@ def main():
     app.add_handler(CallbackQueryHandler(lambda u,c: u.callback_query.answer(), pattern=r"^ignore$"))
 
     # Text input for phone, password, ad message
-    app.add_handler(MessageHandler(filters.TEXT & \~filters.COMMAND, handle_text_input))
+    app.add_handler(MessageHandlerfilters.TEXT & (\~filters.COMMAND) handle_text_input))
 
     # TODO: implement campaign start/stop + actual broadcasting loop
     # app.add_handler(CallbackQueryHandler(campaign_control, pattern=r"^camp\|"))
