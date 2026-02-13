@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Dict, Optional
 from dataclasses import dataclass
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -21,9 +21,7 @@ from telegram.error import BadRequest
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.account import UpdateProfileRequest
-from telethon.tl.functions.users import GetFullUserRequest
-from telethon.tl.types import UserFull
-from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, AuthKeyUnregisteredError
+from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError
 
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -40,9 +38,7 @@ PROFILE_BIO = "🚀 Professional Telegram Marketing Automation | Managed by @nex
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
@@ -50,7 +46,7 @@ db = AsyncIOMotorClient(MONGO_URI)["adimyze"]
 
 @dataclass
 class UserState:
-    step: str = "idle"  # idle, phone, code, password, set_ad, set_delay_custom
+    step: str = "idle"
     phone: str = ""
     phone_code_hash: str = ""
     client: Optional[TelegramClient] = None
@@ -59,23 +55,72 @@ class UserState:
 
 user_states: Dict[int, UserState] = {}
 
-# --- Helper Functions ---
-
-def format_time(seconds: int) -> str:
-    if seconds < 60:
-        return f"{seconds}s"
-    elif seconds < 3600:
-        return f"{seconds // 60}min"
-    else:
-        return f"{seconds // 3600}h"
-
-def get_delay_emoji(seconds: int) -> str:
-    if seconds <= 300:
-        return "🔴"
-    elif seconds <= 600:
-        return "🟡"
-    else:
-        return "🟢"
+# --- SMART MESSAGE EDITING HELPER ---
+async def safe_edit_message(query, text=None, caption=None, reply_markup=None):
+    """
+    Safely edit messages handling both text-only and photo-with-caption scenarios.
+    Always prefers editing over sending new messages for smooth UX.
+    """
+    try:
+        # Case 1: We want to show a photo (caption mode)
+        if caption is not None:
+            try:
+                # Try to edit existing photo's caption
+                await query.edit_message_caption(
+                    caption=caption,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+            except BadRequest as e:
+                if "message is not modified" in str(e).lower():
+                    return
+                # If no caption exists, replace entire message with photo
+                await query.edit_message_media(
+                    media=InputMediaPhoto(media=BANNER_URL, caption=caption),
+                    reply_markup=reply_markup
+                )
+                return
+        
+        # Case 2: Text-only message
+        elif text is not None:
+            try:
+                # Try to edit existing text
+                await query.edit_message_text(
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+            except BadRequest as e:
+                if "message is not modified" in str(e).lower():
+                    return
+                # If editing fails (e.g., trying to edit photo as text), send new text message
+                await query.message.reply_text(
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                await query.message.delete()
+                return
+    
+    except Exception as e:
+        logger.error(f"Safe edit failed: {e}")
+        # Final fallback: send new message
+        if caption is not None:
+            await query.message.reply_photo(
+                photo=BANNER_URL,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        elif text is not None:
+            await query.message.reply_text(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        await query.message.delete()
 
 # --- Keyboards ---
 
@@ -91,7 +136,7 @@ def kb_start():
 def kb_dashboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Add Accounts", callback_data="acc|add"),
-         InlineKeyboardButton("My Accounts", callback_data="acc|list")],
+         InlineKeyboardButton("My Accounts", callback_data="acc|list|0")],
         [InlineKeyboardButton("Set Ad Message", callback_data="ad|set"),
          InlineKeyboardButton("Set Time Interval", callback_data="delay|nav")],
         [InlineKeyboardButton("Start Ads", callback_data="camp|start"),
@@ -124,10 +169,13 @@ def kb_otp(user_id):
     ])
 
 def kb_delay(current_delay: int = 300):
+    def get_emoji(sec):
+        return "🔴" if sec <= 300 else "🟡" if sec <= 600 else "🟢"
+    
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"5min {get_delay_emoji(300)}", callback_data="setdelay|300"),
-         InlineKeyboardButton(f"10min {get_delay_emoji(600)}", callback_data="setdelay|600")],
-        [InlineKeyboardButton(f"20min {get_delay_emoji(1200)}", callback_data="setdelay|1200")],
+        [InlineKeyboardButton(f"5min {get_emoji(300)}", callback_data="setdelay|300"),
+         InlineKeyboardButton(f"10min {get_emoji(600)}", callback_data="setdelay|600")],
+        [InlineKeyboardButton(f"20min {get_emoji(1200)}", callback_data="setdelay|1200")],
         [InlineKeyboardButton("Custom", callback_data="delay|custom")],
         [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
     ])
@@ -142,7 +190,7 @@ def kb_accounts(accounts, page=0):
     for acc in page_accounts:
         status = "🟢" if acc.get("active", False) else "🔴"
         phone = acc["phone"]
-        display = f"{status} {phone[-4:]}"  # Show last 4 digits for privacy
+        display = f"{status} ••••{phone[-4:]}"  # Privacy: show last 4 digits
         buttons.append([InlineKeyboardButton(display, callback_data=f"acc|detail|{acc['_id']}")])
     
     nav_buttons = []
@@ -159,15 +207,15 @@ def kb_accounts(accounts, page=0):
 
 def kb_account_detail(acc_id, phone):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Delete Account", callback_data=f"acc|delete|{acc_id}")],
-        [InlineKeyboardButton("Back to List", callback_data="acc|list|0")],
-        [InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")]
+        [InlineKeyboardButton("🗑️ Delete Account", callback_data=f"acc|delete|{acc_id}")],
+        [InlineKeyboardButton("◀️ Back to List", callback_data="acc|list|0")],
+        [InlineKeyboardButton("🏠 Dashboard", callback_data="nav|dashboard")]
     ])
 
-def kb_confirm(text: str, yes_data: str, no_data: str = "nav|dashboard"):
+def kb_confirm_delete(acc_id):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"✅ Yes", callback_data=yes_data),
-         InlineKeyboardButton(f"❌ No", callback_data=no_data)]
+        [InlineKeyboardButton("✅ Yes, Delete", callback_data=f"acc|confirm_del|{acc_id}"),
+         InlineKeyboardButton("❌ Cancel", callback_data="nav|dashboard")]
     ])
 
 # --- Handlers ---
@@ -178,21 +226,25 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Smart Delays\n"
             "• Multi-Account Support\n\n"
             "For support contact: @NexaCoders")
-    msg = update.message or update.callback_query.message if update.callback_query else None
     
-    if not msg:
-        return
-    
-    try:
-        await msg.reply_photo(
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        # Always show banner on /start
+        await query.message.reply_photo(
             photo=BANNER_URL,
             caption=text,
             reply_markup=kb_start(),
             parse_mode=ParseMode.MARKDOWN
         )
-    except Exception as e:
-        logger.warning(f"Failed to send photo: {e}")
-        await msg.reply_text(text, reply_markup=kb_start(), parse_mode=ParseMode.MARKDOWN)
+        await query.message.delete()
+    else:
+        await update.message.reply_photo(
+            photo=BANNER_URL,
+            caption=text,
+            reply_markup=kb_start(),
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -202,22 +254,28 @@ async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if dest == "start":
         await cmd_start(update, context)
+    
     elif dest == "dashboard":
-        await query.edit_message_caption(
-            caption="╰_╯ DASHBOARD\n\nManage your ad campaigns and accounts:",
-            reply_markup=kb_dashboard()
-        )
+        text = ("╰_╯ DASHBOARD\n\n"
+                "📱 Manage your ad campaigns and accounts:\n\n"
+                "✅ Add & manage Telegram accounts\n"
+                "✏️ Set custom ad messages\n"
+                "⏱️ Configure broadcast intervals\n"
+                "🚀 Start/stop campaigns instantly")
+        await safe_edit_message(query, text=text, reply_markup=kb_dashboard())
+    
     elif dest == "howto":
         text = ("╰_╯ HOW TO USE\n\n"
-                "1️⃣ Add Account → Host your Telegram account\n"
-                "2️⃣ Set Ad Message → Create your promotional text\n"
-                "3️⃣ Set Time Interval → Configure broadcast frequency\n"
-                "4️⃣ Start Ads → Begin automated broadcasting\n\n"
-                "⚠️ Note: Using aggressive intervals may risk account suspension")
-        await query.edit_message_caption(
-            caption=text,
+                "1️⃣ Tap *Add Accounts* → Host your Telegram account\n"
+                "2️⃣ Tap *Set Ad Message* → Create your promotional text\n"
+                "3️⃣ Tap *Set Time Interval* → Configure broadcast frequency\n"
+                "4️⃣ Tap *Start Ads* → Begin automated broadcasting\n\n"
+                "⚠️ *Warning*: Aggressive intervals (<5 min) may risk account suspension")
+        await safe_edit_message(
+            query,
+            text=text,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
+                [InlineKeyboardButton("◀️ Back", callback_data="nav|dashboard")]
             ])
         )
 
@@ -231,14 +289,15 @@ async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if action == "add":
         user_states[user_id] = UserState(step="phone")
         text = ("╰_╯ HOST NEW ACCOUNT\n\n"
-                "🔐 Secure Account Hosting\n\n"
+                "🔐 *Secure Account Hosting*\n\n"
                 "Enter your phone number with country code:\n"
-                "Example: +1234567890\n\n"
+                "`Example: +1234567890`\n\n"
                 "🔒 Your data is encrypted and secure")
-        await query.edit_message_caption(
-            caption=text,
+        await safe_edit_message(
+            query,
+            text=text,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
+                [InlineKeyboardButton("◀️ Back", callback_data="nav|dashboard")]
             ])
         )
     
@@ -247,30 +306,33 @@ async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE)
         accounts = await db.accounts.find({"user_id": user_id}).to_list(None)
         
         if not accounts:
-            await query.answer("No accounts added yet!", show_alert=True)
+            await query.answer("📭 No accounts added yet!", show_alert=True)
+            text = "📱 *MY ACCOUNTS*\n\nYou haven't added any accounts yet.\nTap *Add Accounts* to get started!"
+            await safe_edit_message(query, text=text, reply_markup=kb_dashboard())
             return
         
-        await query.edit_message_caption(
-            caption=f"📱 MY ACCOUNTS ({len(accounts)})\n\nSelect an account to manage:",
-            reply_markup=kb_accounts(accounts, page)
-        )
+        text = f"📱 *MY ACCOUNTS* ({len(accounts)})\n\nSelect an account to manage:"
+        await safe_edit_message(query, text=text, reply_markup=kb_accounts(accounts, page))
     
     elif action == "detail":
         acc_id = parts[2]
         account = await db.accounts.find_one({"_id": acc_id, "user_id": user_id})
         if not account:
-            await query.answer("Account not found!", show_alert=True)
+            await query.answer("❌ Account not found!", show_alert=True)
             return
         
         status = "🟢 Active" if account.get("active") else "🔴 Inactive"
         phone = account["phone"]
-        text = (f"📱 ACCOUNT DETAILS\n\n"
-                f"Phone: {phone}\n"
-                f"Status: {status}\n"
-                f"Added: {account.get('created_at', 'N/A')}")
+        added = account.get("created_at", datetime.now(timezone.utc)).strftime("%d/%m/%y")
         
-        await query.edit_message_caption(
-            caption=text,
+        text = (f"📱 *ACCOUNT DETAILS*\n\n"
+                f"📞 Phone: `{phone}`\n"
+                f"📊 Status: {status}\n"
+                f"📅 Added: {added}")
+        
+        await safe_edit_message(
+            query,
+            text=text,
             reply_markup=kb_account_detail(acc_id, phone)
         )
     
@@ -278,14 +340,18 @@ async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE)
         acc_id = parts[2]
         account = await db.accounts.find_one({"_id": acc_id, "user_id": user_id})
         if not account:
-            await query.answer("Account not found!", show_alert=True)
+            await query.answer("❌ Account not found!", show_alert=True)
             return
         
         phone = account["phone"]
-        confirm_text = f"⚠️ DELETE ACCOUNT\n\nAre you sure you want to delete:\n{phone}?"
-        await query.edit_message_caption(
-            caption=confirm_text,
-            reply_markup=kb_confirm("Delete", f"acc|confirm_del|{acc_id}")
+        text = (f"⚠️ *DELETE ACCOUNT*\n\n"
+                f"Are you sure you want to delete:\n"
+                f"`{phone}`?\n\n"
+                f"❗ This action cannot be undone!")
+        await safe_edit_message(
+            query,
+            text=text,
+            reply_markup=kb_confirm_delete(acc_id)
         )
     
     elif action == "confirm_del":
@@ -295,78 +361,99 @@ async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.answer("✅ Account deleted successfully!", show_alert=True)
         else:
             await query.answer("❌ Failed to delete account!", show_alert=True)
-        await query.edit_message_caption(
-            caption="╰_╯ DASHBOARD\n\nManage your ad campaigns and accounts:",
-            reply_markup=kb_dashboard()
-        )
+        
+        text = "╰_╯ DASHBOARD\n\nAccount management updated successfully."
+        await safe_edit_message(query, text=text, reply_markup=kb_dashboard())
     
     elif action == "del":
         accounts = await db.accounts.count_documents({"user_id": user_id})
         if accounts == 0:
-            await query.answer("No accounts to delete!", show_alert=True)
+            await query.answer("📭 No accounts to delete!", show_alert=True)
             return
         
-        text = "🗑️ DELETE ACCOUNTS\n\nSelect accounts to remove from your campaign:"
-        await query.edit_message_caption(
-            caption=text,
+        text = ("🗑️ *DELETE ACCOUNTS*\n\n"
+                "Select accounts to remove from your campaign.\n"
+                "⚠️ Deleted accounts cannot be recovered!")
+        await safe_edit_message(
+            query,
+            text=text,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("View & Delete Accounts", callback_data="acc|list|0")],
-                [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
+                [InlineKeyboardButton("📱 View & Delete Accounts", callback_data="acc|list|0")],
+                [InlineKeyboardButton("◀️ Back", callback_data="nav|dashboard")]
             ])
         )
 
 async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     state = user_states.get(user_id)
-    text = update.message.text.strip()
-
     if not state or state.step == "idle":
         return
 
+    text = update.message.text.strip()
+
     try:
         if state.step == "phone":
-            # Validate and format phone number
             phone = "+" + re.sub(r"\D", "", text)
-            if len(phone) < 8 or len(phone) > 15:
+            if not (8 <= len(phone) <= 15):
                 await update.message.reply_text(
-                    "❌ Invalid phone number!\n\nPlease enter a valid number with country code:",
+                    "❌ *Invalid phone number!*\n\nPlease enter a valid number with country code:\n`Example: +1234567890`",
                     reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
-                    ])
+                        [InlineKeyboardButton("◀️ Back", callback_data="nav|dashboard")]
+                    ]),
+                    parse_mode=ParseMode.MARKDOWN
                 )
                 return
             
-            # Initialize client and request code
             client = TelegramClient(StringSession(), API_ID, API_HASH)
             await client.connect()
             
-            sent = await client.send_code_request(phone)
-            state.client = client
-            state.phone = phone
-            state.phone_code_hash = sent.phone_code_hash
-            state.step = "code"
-            state.buffer = ""
-            
-            await update.message.reply_text(
-                f"⏳ Hold! We're trying to OTP...\n\n📱 Phone: {phone}\nPlease wait a moment."
-            )
-            await update.message.reply_text(
-                "🔢 Enter OTP using the keypad below:",
-                reply_markup=kb_otp(user_id)
-            )
+            try:
+                sent = await client.send_code_request(phone)
+                state.client = client
+                state.phone = phone
+                state.phone_code_hash = sent.phone_code_hash
+                state.step = "code"
+                state.buffer = ""
+                
+                await update.message.reply_text(
+                    f"⏳ *Verifying OTP...*\n\n📱 Phone: `{phone}`\nPlease wait a moment...",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                await update.message.reply_text(
+                    "🔢 *Enter OTP*\n\nUse the keypad below to enter the 5-digit code:",
+                    reply_markup=kb_otp(user_id),
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                await client.disconnect()
+                error = str(e)
+                if "FLOOD_WAIT" in error:
+                    wait = re.search(r'FLOOD_WAIT_(\d+)', error)
+                    msg = f"⏳ Too many requests! Wait {wait.group(1)} seconds before trying again."
+                elif "INVALID_PHONE_NUMBER" in error:
+                    msg = "❌ Invalid phone number format!"
+                else:
+                    msg = f"❌ Error: {error[:100]}"
+                
+                await update.message.reply_text(
+                    f"{msg}\n\nPlease try again:",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("◀️ Back", callback_data="nav|dashboard")]
+                    ])
+                )
         
         elif state.step == "password":
-            # Handle 2FA password
             await finalize_login(user_id, context, password=text)
             user_states[user_id] = UserState(step="idle")
         
         elif state.step == "set_ad":
             if len(text) > 4000:
                 await update.message.reply_text(
-                    "❌ Message too long! (Max 4000 characters)\n\nPlease send a shorter ad message:",
+                    "❌ *Message too long!*\n\nMax 4000 characters allowed.\nPlease send a shorter ad message:",
                     reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
-                    ])
+                        [InlineKeyboardButton("◀️ Back", callback_data="nav|dashboard")]
+                    ]),
+                    parse_mode=ParseMode.MARKDOWN
                 )
                 return
             
@@ -377,8 +464,9 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             user_states[user_id] = UserState(step="idle")
             await update.message.reply_text(
-                "✅ Ad Message Saved Successfully!",
-                reply_markup=kb_dashboard()
+                "✅ *Ad Message Saved Successfully!*",
+                reply_markup=kb_dashboard(),
+                parse_mode=ParseMode.MARKDOWN
             )
         
         elif state.step == "set_delay_custom":
@@ -386,18 +474,20 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 delay = int(text)
                 if delay < 60:
                     await update.message.reply_text(
-                        "⚠️ Minimum interval is 60 seconds!\n\nEnter a valid interval (in seconds):",
+                        "⚠️ *Minimum interval is 60 seconds!*\n\nEnter a valid interval (in seconds):",
                         reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("Back", callback_data="delay|nav")]
-                        ])
+                            [InlineKeyboardButton("◀️ Back", callback_data="delay|nav")]
+                        ]),
+                        parse_mode=ParseMode.MARKDOWN
                     )
                     return
                 if delay > 86400:
                     await update.message.reply_text(
-                        "⚠️ Maximum interval is 86400 seconds (24 hours)!\n\nEnter a valid interval (in seconds):",
+                        "⚠️ *Maximum interval is 86400 seconds (24h)!*\n\nEnter a valid interval:",
                         reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("Back", callback_data="delay|nav")]
-                        ])
+                            [InlineKeyboardButton("◀️ Back", callback_data="delay|nav")]
+                        ]),
+                        parse_mode=ParseMode.MARKDOWN
                     )
                     return
                 
@@ -408,24 +498,27 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 user_states[user_id] = UserState(step="idle", delay=delay)
                 await update.message.reply_text(
-                    f"✅ Interval set to {format_time(delay)} ({delay}s)",
-                    reply_markup=kb_dashboard()
+                    f"✅ *Interval set to {delay}s* ({delay//60} min)",
+                    reply_markup=kb_dashboard(),
+                    parse_mode=ParseMode.MARKDOWN
                 )
             except ValueError:
                 await update.message.reply_text(
-                    "❌ Invalid number!\n\nPlease enter interval in seconds (e.g., 600):",
+                    "❌ *Invalid number!*\n\nPlease enter interval in seconds (e.g., `600`):",
                     reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Back", callback_data="delay|nav")]
-                    ])
+                        [InlineKeyboardButton("◀️ Back", callback_data="delay|nav")]
+                    ]),
+                    parse_mode=ParseMode.MARKDOWN
                 )
     
     except Exception as e:
-        logger.exception(f"Error in input handler: {e}")
+        logger.exception(f"Input handler error: {e}")
         await update.message.reply_text(
-            f"❌ Unexpected error: {str(e)[:100]}\n\nPlease try again or contact support.",
-            reply_markup=kb_dashboard()
+            "❌ *Unexpected error occurred!*\n\nPlease restart the process or contact support.",
+            reply_markup=kb_dashboard(),
+            parse_mode=ParseMode.MARKDOWN
         )
-        if state.client:
+        if state and state.client:
             await state.client.disconnect()
         user_states[user_id] = UserState(step="idle")
 
@@ -435,7 +528,7 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = user_states.get(user_id)
     
     if not state or state.step != "code":
-        await query.answer("Session expired! Please restart the process.", show_alert=True)
+        await query.answer("⚠️ Session expired! Please restart from Dashboard.", show_alert=True)
         return
 
     await query.answer()
@@ -445,12 +538,12 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "back":
         state.buffer = state.buffer[:-1]
     elif action == "show":
-        code_display = state.buffer if state.buffer else "Empty"
+        code_display = state.buffer if state.buffer else "•••••"
         await query.answer(f"Current Code: {code_display}", show_alert=True)
         return
     elif action == "submit":
         if len(state.buffer) != 5:
-            await query.answer("⚠️ Please enter a 5-digit code!", show_alert=True)
+            await query.answer("⚠️ Please enter all 5 digits!", show_alert=True)
             return
         await finalize_login(user_id, context)
         return
@@ -459,128 +552,125 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         await query.edit_message_reply_markup(reply_markup=kb_otp(user_id))
-    except BadRequest:
-        pass  # Message not modified
+    except BadRequest as e:
+        if "message is not modified" not in str(e).lower():
+            logger.warning(f"OTP keyboard update failed: {e}")
 
 async def finalize_login(user_id, context, password=None):
     state = user_states.get(user_id)
     if not state or not state.client:
         await context.bot.send_message(
             user_id,
-            "❌ Session expired! Please restart the login process.",
-            reply_markup=kb_dashboard()
+            "❌ *Session expired!*\n\nPlease restart the login process from Dashboard.",
+            reply_markup=kb_dashboard(),
+            parse_mode=ParseMode.MARKDOWN
         )
         return
 
     try:
         if password:
-            # Handle 2FA
             await state.client.sign_in(password=password)
         else:
-            # Handle OTP
             await state.client.sign_in(
                 phone=state.phone,
                 code=state.buffer,
                 phone_code_hash=state.phone_code_hash
             )
         
-        # Update profile immediately after login
+        # Update profile immediately
         try:
             await state.client(UpdateProfileRequest(
                 first_name=PROFILE_NAME,
                 about=PROFILE_BIO
             ))
         except Exception as e:
-            logger.warning(f"Failed to update profile for {state.phone}: {e}")
-            # Continue anyway - not critical
+            logger.warning(f"Profile update warning for {state.phone}: {e}")
         
         # Save session
         session = state.client.session.save()
-        account_data = {
-            "user_id": user_id,
-            "phone": state.phone,
-            "session": session,
-            "active": True,
-            "created_at": datetime.now(timezone.utc),
-            "last_used": datetime.now(timezone.utc)
-        }
-        
         await db.accounts.update_one(
             {"user_id": user_id, "phone": state.phone},
-            {"$set": account_data},
+            {"$set": {
+                "session": session,
+                "active": True,
+                "created_at": datetime.now(timezone.utc),
+                "last_used": datetime.now(timezone.utc)
+            }},
             upsert=True
         )
         
-        # Cleanup state
         await state.client.disconnect()
         user_states[user_id] = UserState(step="idle")
         
-        # Success message
-        success_msg = (f"✅ Account Successfully Added!\n\n"
-                      f"📱 Phone: {state.phone}\n"
+        success_msg = (f"✅ *Account Successfully Added!*\n\n"
+                      f"📱 Phone: `{state.phone}`\n"
                       f"╰_╯ Your account is ready for broadcasting!\n\n"
-                      f"ℹ️ Profile name & bio have been updated automatically.")
+                      f"ℹ️ *Profile updated*: Name & bio changed automatically")
         await context.bot.send_message(
             user_id,
             success_msg,
-            reply_markup=kb_dashboard()
+            reply_markup=kb_dashboard(),
+            parse_mode=ParseMode.MARKDOWN
         )
         
     except SessionPasswordNeededError:
         state.step = "password"
         await context.bot.send_message(
             user_id,
-            "🔐 2FA Detected!\n\nPlease send your Telegram cloud password:",
+            "🔐 *2FA Detected!*\n\nPlease send your Telegram cloud password:",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
-            ])
+                [InlineKeyboardButton("◀️ Back", callback_data="nav|dashboard")]
+            ]),
+            parse_mode=ParseMode.MARKDOWN
         )
     except (PhoneCodeInvalidError, ValueError):
-        await context.bot.send_message(
-            user_id,
-            "❌ Invalid OTP code! Please restart the login process.",
-            reply_markup=kb_dashboard()
-        )
         await state.client.disconnect()
         user_states[user_id] = UserState(step="idle")
+        await context.bot.send_message(
+            user_id,
+            "❌ *Invalid OTP code!*\n\nPlease restart the login process.",
+            reply_markup=kb_dashboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
     except Exception as e:
         error_msg = str(e)
         if "PHONE_CODE_EXPIRED" in error_msg or "SESSION_REVOKED" in error_msg:
             error_msg = "OTP expired! Please restart the login process."
         elif "FLOOD_WAIT" in error_msg:
-            wait_time = re.search(r'FLOOD_WAIT_(\d+)', error_msg)
-            if wait_time:
-                error_msg = f"Too many attempts! Please wait {wait_time.group(1)} seconds before trying again."
+            wait = re.search(r'FLOOD_WAIT_(\d+)', error_msg)
+            if wait:
+                error_msg = f"⏳ Too many attempts! Wait {wait.group(1)} seconds before trying again."
             else:
-                error_msg = "Too many attempts! Please try again later."
+                error_msg = "⏳ Too many attempts! Please try again later."
         
-        await context.bot.send_message(
-            user_id,
-            f"❌ Login Failed: {error_msg}",
-            reply_markup=kb_dashboard()
-        )
-        logger.exception(f"Login failed for {state.phone}: {e}")
         await state.client.disconnect()
         user_states[user_id] = UserState(step="idle")
+        await context.bot.send_message(
+            user_id,
+            f"❌ *Login Failed*\n\n{error_msg}",
+            reply_markup=kb_dashboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        logger.exception(f"Login failed for {state.phone}: {e}")
 
 async def handle_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
     
     if query.data == "ad|set":
-        user_states[user_id] = UserState(step="set_ad")
-        text = ("╰_╯ SET YOUR AD MESSAGE\n\n"
-                "💡 Tips for effective ads:\n"
+        text = ("╰_╯ *SET YOUR AD MESSAGE*\n\n"
+                "💡 *Tips for effective ads:*\n"
                 "• Keep it concise and engaging\n"
                 "• Use premium emojis for flair\n"
                 "• Include clear call-to-action\n"
                 "• Avoid excessive caps or spam words\n\n"
-                "📤 Send your ad message now:")
-        await query.edit_message_caption(
-            caption=text,
+                "📤 *Send your ad message now:*")
+        user_states[query.from_user.id] = UserState(step="set_ad")
+        await safe_edit_message(
+            query,
+            text=text,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
+                [InlineKeyboardButton("◀️ Back", callback_data="nav|dashboard")]
             ])
         )
 
@@ -593,27 +683,30 @@ async def handle_delay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if parts[0] == "delay":
         action = parts[1]
         if action == "nav":
-            # Get current delay from DB or use default
             user_doc = await db.users.find_one({"user_id": str(user_id)})
             current_delay = user_doc.get("delay", 300) if user_doc else 300
             
-            text = (f"╰_╯ SET BROADCAST CYCLE INTERVAL\n\n"
-                   f"Current Interval: {format_time(current_delay)} ({current_delay}s)\n\n"
-                   f"Recommended Intervals:\n"
-                   f"• 300s - Aggressive (5 min) 🔴\n"
-                   f"• 600s - Safe & Balanced (10 min) 🟡\n"
-                   f"• 1200s - Conservative (20 min) 🟢\n\n"
-                   f"⚠️ Note: Using short intervals may risk account suspension.")
-            await query.edit_message_caption(
-                caption=text,
-                reply_markup=kb_delay(current_delay)
-            )
+            text = (f"╰_╯ *SET BROADCAST CYCLE INTERVAL*\n\n"
+                   f"⏱️ Current Interval: `{current_delay}s` ({current_delay//60} min)\n\n"
+                   f"✅ *Recommended Intervals:*\n"
+                   f"• `300s` - Aggressive (5 min) 🔴\n"
+                   f"• `600s` - Safe & Balanced (10 min) 🟡\n"
+                   f"• `1200s` - Conservative (20 min) 🟢\n\n"
+                   f"⚠️ *Warning*: Short intervals increase suspension risk!")
+            await safe_edit_message(query, text=text, reply_markup=kb_delay(current_delay))
+        
         elif action == "custom":
             user_states[user_id] = UserState(step="set_delay_custom")
-            await query.edit_message_caption(
-                caption="╰_╯ CUSTOM INTERVAL\n\nEnter interval in seconds (min 60, max 86400):\nExample: 900",
+            text = ("╰_╯ *CUSTOM INTERVAL*\n\n"
+                   "Enter interval in seconds:\n"
+                   "`Minimum: 60s`\n"
+                   "`Maximum: 86400s (24h)`\n\n"
+                   "Example: `900` for 15 minutes")
+            await safe_edit_message(
+                query,
+                text=text,
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Back", callback_data="delay|nav")]
+                    [InlineKeyboardButton("◀️ Back", callback_data="delay|nav")]
                 ])
             )
     
@@ -624,20 +717,16 @@ async def handle_delay(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {"$set": {"delay": delay, "updated_at": datetime.now(timezone.utc)}},
             upsert=True
         )
-        await query.answer(f"✅ Interval set to {format_time(delay)}", show_alert=True)
-        user_doc = await db.users.find_one({"user_id": str(user_id)})
-        current_delay = user_doc.get("delay", 300) if user_doc else 300
-        text = (f"╰_╯ SET BROADCAST CYCLE INTERVAL\n\n"
-               f"Current Interval: {format_time(current_delay)} ({current_delay}s)\n\n"
-               f"Recommended Intervals:\n"
-               f"• 300s - Aggressive (5 min) 🔴\n"
-               f"• 600s - Safe & Balanced (10 min) 🟡\n"
-               f"• 1200s - Conservative (20 min) 🟢\n\n"
-               f"⚠️ Note: Using short intervals may risk account suspension.")
-        await query.edit_message_caption(
-            caption=text,
-            reply_markup=kb_delay(current_delay)
-        )
+        await query.answer(f"✅ Interval set to {delay}s", show_alert=True)
+        
+        text = (f"╰_╯ *SET BROADCAST CYCLE INTERVAL*\n\n"
+               f"⏱️ Current Interval: `{delay}s` ({delay//60} min)\n\n"
+               f"✅ *Recommended Intervals:*\n"
+               f"• `300s` - Aggressive (5 min) 🔴\n"
+               f"• `600s` - Safe & Balanced (10 min) 🟡\n"
+               f"• `1200s` - Conservative (20 min) 🟢\n\n"
+               f"⚠️ *Warning*: Short intervals increase suspension risk!")
+        await safe_edit_message(query, text=text, reply_markup=kb_delay(delay))
 
 async def handle_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -646,168 +735,141 @@ async def handle_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = query.data.split("|")
     
     if parts[1] == "main":
-        # Get stats
-        active_accounts = await db.accounts.count_documents({"user_id": user_id, "active": True})
-        total_accounts = await db.accounts.count_documents({"user_id": user_id})
-        
-        # Get user settings
+        active = await db.accounts.count_documents({"user_id": user_id, "active": True})
+        total = await db.accounts.count_documents({"user_id": user_id})
         user_doc = await db.users.find_one({"user_id": str(user_id)})
-        current_delay = user_doc.get("delay", 300) if user_doc else 300
+        delay = user_doc.get("delay", 300) if user_doc else 300
         
-        # Get campaign stats (placeholder - would need actual broadcast tracking)
-        total_sent = 0
-        total_failed = 0
-        broadcast_cycles = 0
+        # Placeholder stats (would connect to real broadcast tracking)
+        sent, failed, cycles = 0, 0, 0
+        rate = int((sent / (sent + failed) * 100)) if (sent + failed) > 0 else 0
+        bar = "▓" * (rate // 10) + "░" * (10 - rate // 10)
         
-        # Calculate success rate
-        total_attempts = total_sent + total_failed
-        success_rate = int((total_sent / total_attempts * 100)) if total_attempts > 0 else 0
-        bar = "▓" * (success_rate // 10) + "░" * (10 - success_rate // 10)
+        text = (f"╰_╯ *@NexaCoders ANALYTICS*\n\n"
+               f"🔄 Broadcast Cycles: {cycles}\n"
+               f"✅ Messages Sent: {sent}\n"
+               f"❌ Failed Sends: {failed}\n"
+               f"📱 Active Accounts: {active}/{total}\n"
+               f"⏱️ Avg Delay: {delay}s\n\n"
+               f"📈 Success Rate: {bar} {rate}%")
         
-        text = (f"╰_╯ @NexaCoders ANALYTICS\n\n"
-               f"Broadcast Cycles: {broadcast_cycles}\n"
-               f"Messages Sent: {total_sent}\n"
-               f"Failed Sends: {total_failed}\n"
-               f"Active Accounts: {active_accounts}/{total_accounts}\n"
-               f"Avg Delay: {format_time(current_delay)}\n\n"
-               f"Success Rate: {bar} {success_rate}%")
-        
-        await query.edit_message_caption(
-            caption=text,
+        await safe_edit_message(
+            query,
+            text=text,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Detailed Report", callback_data="stat|detail")],
-                [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
+                [InlineKeyboardButton("📊 Detailed Report", callback_data="stat|detail")],
+                [InlineKeyboardButton("◀️ Back", callback_data="nav|dashboard")]
             ])
         )
     
     elif parts[1] == "detail":
-        # Get detailed stats
-        active_accounts = await db.accounts.count_documents({"user_id": user_id, "active": True})
-        total_accounts = await db.accounts.count_documents({"user_id": user_id})
-        inactive_accounts = total_accounts - active_accounts
-        
+        active = await db.accounts.count_documents({"user_id": user_id, "active": True})
+        total = await db.accounts.count_documents({"user_id": user_id})
+        inactive = total - active
         user_doc = await db.users.find_one({"user_id": str(user_id)})
-        current_delay = user_doc.get("delay", 300) if user_doc else 300
+        delay = user_doc.get("delay", 300) if user_doc else 300
         
-        # Placeholder stats - would need actual tracking system
-        total_sent = 0
-        total_failed = 0
-        broadcast_cycles = 0
-        logger_failures = 0
-        last_failure = "None"
+        now = datetime.now(timezone.utc).strftime("%d/%m/%y")
         
-        now = datetime.now(timezone.utc)
-        date_str = now.strftime("%d/%m/%y")
+        text = (f"╰_╯ *DETAILED ANALYTICS REPORT*\n\n"
+               f"📅 Date: {now}\n"
+               f"🆔 User ID: `{user_id}`\n\n"
+               f"📤 *Broadcast Stats:*\n"
+               f"• Total Sent: 0\n"
+               f"• Total Failed: 0\n"
+               f"• Total Broadcasts: 0\n\n"
+               f"⚙️ *Logger Stats:*\n"
+               f"• Logger Failures: 0\n"
+               f"• Last Failure: None\n\n"
+               f"📱 *Account Stats:*\n"
+               f"• Total Accounts: {total}\n"
+               f"• Active Accounts: {active} 🟢\n"
+               f"• Inactive Accounts: {inactive} 🔴\n\n"
+               f"⏱️ Current Delay: {delay}s ({delay//60} min)")
         
-        text = (f"╰_╯ DETAILED ANALYTICS REPORT\n\n"
-               f"Date: {date_str}\n"
-               f"User ID: {user_id}\n\n"
-               f"Broadcast Stats:\n"
-               f"- Total Sent: {total_sent}\n"
-               f"- Total Failed: {total_failed}\n"
-               f"- Total Broadcasts: {broadcast_cycles}\n\n"
-               f"Logger Stats:\n"
-               f"- Logger Failures: {logger_failures}\n"
-               f"- Last Failure: {last_failure}\n\n"
-               f"Account Stats:\n"
-               f"- Total Accounts: {total_accounts}\n"
-               f"- Active Accounts: {active_accounts} 🟢\n"
-               f"- Inactive Accounts: {inactive_accounts} 🔴\n\n"
-               f"Current Delay: {format_time(current_delay)} ({current_delay}s)")
-        
-        await query.edit_message_caption(
-            caption=text,
+        await safe_edit_message(
+            query,
+            text=text,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Back", callback_data="stat|main")]
+                [InlineKeyboardButton("◀️ Back", callback_data="stat|main")]
             ])
         )
 
 async def handle_features(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    parts = query.data.split("|")
     
-    if parts[1] == "auto":
-        text = ("╰_╯ AUTO REPLY FEATURE\n\n"
-               "🔜 This feature is coming soon!\n\n"
+    if "auto" in query.data:
+        text = ("╰_╯ *AUTO REPLY FEATURE*\n\n"
+               "🔜 *Coming Soon!*\n\n"
                "Stay tuned for automated reply capabilities to enhance your campaigns.\n\n"
-               "💡 Planned features:\n"
+               "💡 *Planned features:*\n"
                "• Keyword-based auto replies\n"
                "• Smart response templates\n"
-               "• Conversation flow management")
-        await query.edit_message_caption(
-            caption=text,
+               "• Conversation flow management\n"
+               "• Spam protection filters")
+        await safe_edit_message(
+            query,
+            text=text,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
+                [InlineKeyboardButton("◀️ Back", callback_data="nav|dashboard")]
             ])
         )
 
 async def handle_campaigns(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    parts = query.data.split("|")
     user_id = query.from_user.id
     
-    if parts[1] == "start":
-        # Check if user has accounts and ad message
+    if "start" in query.data:
         accounts = await db.accounts.count_documents({"user_id": user_id, "active": True})
-        ad_doc = await db.ads.find_one({"user_id": str(user_id)})
+        ad = await db.ads.find_one({"user_id": str(user_id)})
         
         if accounts == 0:
             await query.answer("❌ No active accounts! Add accounts first.", show_alert=True)
             return
-        
-        if not ad_doc or not ad_doc.get("text"):
+        if not ad or not ad.get("text"):
             await query.answer("❌ No ad message set! Set your ad message first.", show_alert=True)
             return
         
-        # In a real implementation, this would start background tasks
-        # For now, we'll just show a confirmation
+        # In production: start background broadcast task here
         await query.answer("✅ Campaign started successfully!", show_alert=True)
-        await query.edit_message_caption(
-            caption="🚀 CAMPAIGN STARTED\n\n"
-                   "Your ads are now broadcasting to all joined groups.\n\n"
-                   "📊 Monitor progress in Analytics section.",
+        text = ("🚀 *CAMPAIGN STARTED*\n\n"
+               "Your ads are now broadcasting to all joined groups.\n\n"
+               "📊 Monitor progress in *Analytics* section.\n"
+               "⏸️ Tap *Stop Ads* anytime to pause broadcasting.")
+        await safe_edit_message(
+            query,
+            text=text,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Analytics", callback_data="stat|main")],
-                [InlineKeyboardButton("Stop Ads", callback_data="camp|stop")],
-                [InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")]
+                [InlineKeyboardButton("📊 Analytics", callback_data="stat|main")],
+                [InlineKeyboardButton("⏹️ Stop Ads", callback_data="camp|stop")],
+                [InlineKeyboardButton("🏠 Dashboard", callback_data="nav|dashboard")]
             ])
         )
     
-    elif parts[1] == "stop":
-        # In a real implementation, this would stop background tasks
+    elif "stop" in query.data:
+        # In production: stop background broadcast task here
         await query.answer("🛑 Campaign stopped successfully!", show_alert=True)
-        await query.edit_message_caption(
-            caption="⏸️ CAMPAIGN STOPPED\n\n"
-                   "All broadcasting activities have been paused.\n\n"
-                   "You can restart anytime from the dashboard.",
-            reply_markup=kb_dashboard()
-        )
+        text = ("⏸️ *CAMPAIGN STOPPED*\n\n"
+               "All broadcasting activities have been paused.\n\n"
+               "You can restart anytime from the dashboard.")
+        await safe_edit_message(query, text=text, reply_markup=kb_dashboard())
 
 async def handle_noop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for noop buttons (display-only)"""
-    query = update.callback_query
-    await query.answer()
+    await update.callback_query.answer()
 
-# --- Main Application ---
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"Update {update} caused error: {context.error}")
 
 async def post_init(application: Application):
-    """Initialize bot settings after startup"""
-    bot = application.bot
-    try:
-        await bot.set_chat_menu_button()
-        logger.info("Bot initialized successfully")
-    except Exception as e:
-        logger.warning(f"Failed to set menu button: {e}")
+    logger.info("Bot initialized successfully")
 
 async def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
-    # Command Handlers
+    # Handlers
     app.add_handler(CommandHandler("start", cmd_start))
-    
-    # Callback Query Handlers (order matters - more specific first)
     app.add_handler(CallbackQueryHandler(handle_noop, pattern=r"^noop$"))
     app.add_handler(CallbackQueryHandler(handle_otp, pattern=r"^otp\|"))
     app.add_handler(CallbackQueryHandler(handle_account_ops, pattern=r"^acc\|"))
@@ -817,22 +879,15 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_features, pattern=r"^feature\|"))
     app.add_handler(CallbackQueryHandler(handle_campaigns, pattern=r"^camp\|"))
     app.add_handler(CallbackQueryHandler(handle_navigation, pattern=r"^nav\|"))
-    
-    # Message Handlers
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, input_handler))
-    
-    # Error handler
-    app.add_error_handler(lambda update, context: logger.exception(f"Update {update} caused error: {context.error}"))
+    app.add_error_handler(error_handler)
 
     logger.info("Starting bot...")
     await app.initialize()
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
-    logger.info("Bot started successfully!")
-    
-    # Keep running
-    stop_signal = asyncio.Event()
-    await stop_signal.wait()
+    logger.info("✅ Bot is running!")
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     try:
