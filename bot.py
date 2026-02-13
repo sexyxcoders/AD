@@ -147,7 +147,7 @@ def kb_otp(user_id):
 
         [InlineKeyboardButton("⌫", callback_data="otp|back"),
          InlineKeyboardButton("0", callback_data="otp|0"),
-         InlineKeyboardButton("❌ Cancel", callback_data="otp|cancel")],
+         InlineKeyboardButton("❌", callback_data="otp|cancel")],
 
         [InlineKeyboardButton("Show Code", url="tg://openmessage?user_id=777000")]
     ])
