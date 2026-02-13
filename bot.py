@@ -111,14 +111,19 @@ def kb_dashboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Add Accounts", callback_data="acc|add"),
          InlineKeyboardButton("My Accounts", callback_data="acc|list|0")],
+
         [InlineKeyboardButton("Set Ad Message", callback_data="ad|set"),
          InlineKeyboardButton("Set Time Interval", callback_data="delay|nav")],
+
         [InlineKeyboardButton("Start Ads", callback_data="camp|start"),
          InlineKeyboardButton("Stop Ads", callback_data="camp|stop")],
+
         [InlineKeyboardButton("Delete Accounts", callback_data="acc|del"),
          InlineKeyboardButton("Analytics", callback_data="stat|main")],
-        [InlineKeyboardButton("Auto Reply", callback_data="feature|auto")],
-        [InlineKeyboardButton("Back", callback_data="nav|start")]
+
+        # 👇 Auto Reply & Back side by side
+        [InlineKeyboardButton("Auto Reply", callback_data="feature|auto"),
+         InlineKeyboardButton("Back", callback_data="nav|start")]
     ])
 
 def kb_otp(user_id):
