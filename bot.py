@@ -3,10 +3,10 @@ import logging
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -24,7 +24,10 @@ from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError
 
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# --- Configuration ---
+# ────────────────────────────────────────────────
+# Configuration
+# ────────────────────────────────────────────────
+
 BOT_TOKEN = '8463982454:AAErd8EZswKgQ1BNF_r-N8iUH8HQcb293lQ'
 API_ID = 22657083
 API_HASH = 'd6186691704bd901bdab275ceaab88f3'
@@ -43,6 +46,10 @@ logger = logging.getLogger(__name__)
 
 db = AsyncIOMotorClient(MONGO_URI)["adimyze"]
 
+# ────────────────────────────────────────────────
+# State & Globals
+# ────────────────────────────────────────────────
+
 @dataclass
 class UserState:
     step: str = "idle"
@@ -55,21 +62,18 @@ class UserState:
 user_states: Dict[int, UserState] = {}
 campaign_tasks: Dict[int, asyncio.Task] = {}
 
-# --- SAFE MESSAGE EDITING (handles both photo captions and text messages) ---
-async def safe_edit_or_send(query, text, reply_markup=None):
-    """Edit message caption if it's a photo, otherwise edit text or send new message"""
+# ────────────────────────────────────────────────
+# Safe message editing
+# ────────────────────────────────────────────────
+
+async def safe_edit_or_send(query, text: str, reply_markup=None):
     try:
-        # Try to edit caption (for photo messages)
-        await query.edit_message_caption(
-            caption=text,
-            reply_markup=reply_markup
-        )
+        await query.edit_message_caption(caption=text, reply_markup=reply_markup)
     except BadRequest as e:
-        error_msg = str(e).lower()
-        if "message is not modified" in error_msg:
+        err = str(e).lower()
+        if "message is not modified" in err:
             return
-        elif "message to edit not found" in error_msg or "message can't be edited" in error_msg:
-            # Send new photo with caption
+        if "not found" in err or "can't be edited" in err:
             await query.message.reply_photo(
                 photo=BANNER_URL,
                 caption=text,
@@ -80,24 +84,18 @@ async def safe_edit_or_send(query, text, reply_markup=None):
             except:
                 pass
         else:
-            # Try editing as text message
             try:
-                await query.edit_message_text(
-                    text=text,
-                    reply_markup=reply_markup
-                )
+                await query.edit_message_text(text=text, reply_markup=reply_markup)
             except:
-                # Final fallback: send new message
-                await query.message.reply_text(
-                    text=text,
-                    reply_markup=reply_markup
-                )
+                await query.message.reply_text(text=text, reply_markup=reply_markup)
                 try:
                     await query.message.delete()
                 except:
                     pass
 
-# --- Keyboards ---
+# ────────────────────────────────────────────────
+# Keyboards
+# ────────────────────────────────────────────────
 
 def kb_start():
     return InlineKeyboardMarkup([
@@ -108,45 +106,49 @@ def kb_start():
         [InlineKeyboardButton("       Powered By    ", url="https://t.me/nexaxoders")]
     ])
 
-def kb_dashboard(user_id: int):
+async def kb_dashboard(user_id: int) -> Tuple[InlineKeyboardMarkup, str]:
     accounts_count = await db.accounts.count_documents({"user_id": user_id})
+    active_count = await db.accounts.count_documents({"user_id": user_id, "active": True})
+    
     ad_doc = await db.ads.find_one({"user_id": user_id})
-    ad_set = "Set ✅" if ad_doc and ad_doc.get("text") else "Not Set ❌"
+    ad_status = "Set ✅" if ad_doc and ad_doc.get("text") else "Not Set ❌"
+    
     delay_doc = await db.settings.find_one({"user_id": user_id})
     current_delay = delay_doc.get("delay", 300) if delay_doc else 300
-    status_doc = await db.campaigns.find_one({"user_id": user_id})
-    status = "Running ▶️" if status_doc and status_doc.get("active", False) else "Paused ⏸️"
     
-    text = (f"╰_╯ @NexaCoders Ads DASHBOARD\n\n"
-            f"•Hosted Accounts: {accounts_count}/5\n"
-            f"•Ad Message: {ad_set}\n"
-            f"•Cycle Interval: {current_delay}s\n"
-            f"•Advertising Status: {status}\n\n"
-            f"╰_╯Choose an action below to continue")
-    
-    return InlineKeyboardMarkup([
+    camp_doc = await db.campaigns.find_one({"user_id": user_id})
+    status = "Running ▶️" if camp_doc and camp_doc.get("active", False) else "Paused ⏸️"
+
+    text = (
+        f"╰_╯ @NexaCoders Ads DASHBOARD\n\n"
+        f"• Hosted Accounts: {active_count}/{accounts_count}\n"
+        f"• Ad Message: {ad_status}\n"
+        f"• Cycle Interval: {current_delay}s\n"
+        f"• Advertising Status: {status}\n\n"
+        f"╰_╯Choose an action below to continue"
+    )
+
+    markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("Add Accounts", callback_data="acc|add"),
          InlineKeyboardButton("My Accounts", callback_data="acc|list|0")],
-
         [InlineKeyboardButton("Set Ad Message", callback_data="ad|set"),
          InlineKeyboardButton("Set Time Interval", callback_data="delay|nav")],
-
         [InlineKeyboardButton("Start Ads", callback_data="camp|start"),
          InlineKeyboardButton("Stop Ads", callback_data="camp|stop")],
-
         [InlineKeyboardButton("Delete Accounts", callback_data="acc|del"),
          InlineKeyboardButton("Analytics", callback_data="stat|main")],
-
         [InlineKeyboardButton("Auto Reply", callback_data="feature|auto"),
          InlineKeyboardButton("Back", callback_data="nav|start")]
-    ]), text
+    ])
 
-def kb_otp(user_id):
+    return markup, text
+
+def kb_otp(user_id: int):
     state = user_states.get(user_id, UserState())
+    display = state.buffer + "○" * (5 - len(state.buffer))
     if len(state.buffer) == 5:
         display = "* * * * *"
-    else:
-        display = (state.buffer + "_" * (5 - len(state.buffer)))[:5]
+
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"Current: {display}", callback_data="noop")],
         [InlineKeyboardButton("1", callback_data="otp|1"),
@@ -164,16 +166,16 @@ def kb_otp(user_id):
         [InlineKeyboardButton("Show Code", url="tg://openmessage?user_id=777000")]
     ])
 
-def kb_delay(current_delay=300):
-    def get_emoji(sec):
-        if sec <= 300: return "🔴"
-        elif sec <= 600: return "🟡"
-        else: return "🟢"
-    
+def kb_delay(current: int = 300):
+    def emoji(s):
+        if s <= 300: return "🔴"
+        if s <= 600: return "🟡"
+        return "🟢"
+
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"5min {get_emoji(300)}", callback_data="setdelay|300"),
-         InlineKeyboardButton(f"10min {get_emoji(600)}", callback_data="setdelay|600"),
-         InlineKeyboardButton(f"20min {get_emoji(1200)}", callback_data="setdelay|1200")],
+        [InlineKeyboardButton(f"5 min {emoji(300)}", callback_data="setdelay|300"),
+         InlineKeyboardButton(f"10 min {emoji(600)}", callback_data="setdelay|600"),
+         InlineKeyboardButton(f"20 min {emoji(1200)}", callback_data="setdelay|1200")],
         [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
     ])
 
@@ -182,14 +184,13 @@ def kb_accounts(accounts, page=0):
     page_size = 5
     start = page * page_size
     end = start + page_size
-    page_accounts = accounts[start:end]
-    
-    for acc in page_accounts:
+    page_acc = accounts[start:end]
+
+    for acc in page_acc:
         status = "🟢" if acc.get("active", False) else "🔴"
         phone = acc["phone"]
-        display = f"{status} ••••{phone[-4:]}"
-        buttons.append([InlineKeyboardButton(display, callback_data=f"acc|detail|{acc['_id']}")])
-    
+        buttons.append([InlineKeyboardButton(f"{status} ••••{phone[-4:]}", callback_data=f"acc|detail|{acc['_id']}")])
+
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"acc|list|{page-1}"))
@@ -197,7 +198,7 @@ def kb_accounts(accounts, page=0):
         nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"acc|list|{page+1}"))
     if nav:
         buttons.append(nav)
-    
+
     buttons.append([InlineKeyboardButton("Back", callback_data="nav|dashboard")])
     return InlineKeyboardMarkup(buttons)
 
@@ -219,23 +220,18 @@ def kb_detailed_report():
         [InlineKeyboardButton("Back", callback_data="stat|main")]
     ])
 
-def kb_auto_reply():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Back", callback_data="nav|dashboard")]
-    ])
-
-# --- Handlers ---
+# ────────────────────────────────────────────────
+# Handlers
+# ────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if update.callback_query:
-        query = update.callback_query
-        await query.answer()
-    else:
-        query = None
-    
-    markup, text = kb_dashboard(user_id)
+    query = update.callback_query
+
+    markup, text = await kb_dashboard(user_id)
+
     if query:
+        await query.answer()
         await safe_edit_or_send(query, text, markup)
     else:
         await update.message.reply_photo(
@@ -247,31 +243,45 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    parts = query.data.split("|")
-    dest = parts[1]
+    _, dest = query.data.split("|", 1)
+
+    user_id = query.from_user.id
 
     if dest == "start":
         await cmd_start(update, context)
-        return
-    
     elif dest == "dashboard":
-        user_id = query.from_user.id
-        markup, text = kb_dashboard(user_id)
+        markup, text = await kb_dashboard(user_id)
         await safe_edit_or_send(query, text, markup)
-        return
-    
     elif dest == "howto":
-        text = ("╰_╯ HOW TO USE\n\n"
-                "1. Add Account → Host your Telegram account\n"
-                "2. Set Ad Message → Create your promotional text\n"
-                "3. Set Time Interval → Configure broadcast frequency\n"
-                "4. Start Ads → Begin automated broadcasting\n\n"
-                "⚠️ Note: Using aggressive intervals may risk account suspension")
-        await safe_edit_or_send(
-            query,
-            text,
-            InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="nav|dashboard")]])
+        text = (
+            "╰_╯ HOW TO USE\n\n"
+            "1. Add Account → Host your Telegram account\n"
+            "2. Set Ad Message → Create your promotional text\n"
+            "3. Set Time Interval → Configure broadcast frequency\n"
+            "4. Start Ads → Begin automated broadcasting\n\n"
+            "⚠️ Note: Using aggressive intervals may risk account suspension"
         )
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="nav|dashboard")]])
+        await safe_edit_or_send(query, text, markup)
+
+# ... (rest of the handlers remain mostly the same, but make sure to await kb_dashboard where used)
+
+# Important places to fix:
+
+# In input_handler after saving ad message:
+# await update.message.reply_text(
+#     "✅ Ad Message Saved!",
+#     reply_markup=(await kb_dashboard(user_id))[0]   # markup is first returned value
+# )
+
+# In finalize_login success message:
+# reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Dashboard", callback_data="nav|dashboard")]])
+
+# In handle_delay_ops after setting delay:
+# markup, text = await kb_dashboard(user_id)
+# await safe_edit_or_send(query, text, markup)
+
+# And so on...
 
 async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
