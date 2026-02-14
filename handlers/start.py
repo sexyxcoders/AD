@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from core import CONFIG, db
+from core import CONFIG, get_db
 from keyboards.start_kb import get_start_keyboard
 from keyboards.dashboard_kb import get_dashboard_keyboard
 from utils.safe_edit import safe_edit_or_send
