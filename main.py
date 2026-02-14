@@ -22,7 +22,6 @@ from core import (
 )
 from handlers import register_handlers
 from services import BROADCAST_MANAGER, initialize_broadcasting
-from utils.safe_edit import setup_error_handling
 
 # Configure root logger
 logging.basicConfig(
@@ -58,7 +57,7 @@ async def post_init(application: Application) -> None:
     logger.info("✓ Broadcasting service initialized")
     
     # Initialize bot_data structure
-    if 'user_states' not in application.bot_
+    if 'user_states' not in application.bot_data:
         application.bot_data['user_states'] = {}
         logger.info("✓ User state storage initialized")
     
@@ -75,14 +74,14 @@ async def post_init(application: Application) -> None:
     logger.info("=" * 60)
     logger.info("✅ BOT STARTED SUCCESSFULLY")
     logger.info(f"   📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
-    logger.info(f"   👥 Handlers registered: {len(application.handlers[0])}")
+    logger.info(f"   👥 Handlers registered: {len(application.handlers)}")
     logger.info(f"   💾 Persistence: PicklePersistence (user_states.dat)")
     logger.info(f"   ⚙️  Default delay: {CONFIG.DEFAULT_DELAY}s")
     logger.info("=" * 60)
 
 async def post_shutdown(application: Application) -> None:
     """Cleanup resources on shutdown"""
-    logger.info(" Shutting down services...")
+    logger.info("🛑 Shutting down services...")
     
     # Stop all active campaigns gracefully
     for user_id in list(BROADCAST_MANAGER._campaigns.keys()):
