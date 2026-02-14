@@ -124,5 +124,8 @@ def get_db() -> DatabaseCollections:
         raise RuntimeError("Database not initialized. Call init_db() first.")
     return DatabaseCollections(_db)
 
-# Export convenience reference
-db = get_db()
+# ❌ REMOVE THIS
+# db = get_db()
+
+# Instead export function only
+__all__ = ["init_db", "get_db", "get_db_client", "DatabaseCollections"]
