@@ -57,7 +57,7 @@ async def post_init(application: Application) -> None:
     logger.info("✓ Broadcasting service initialized")
     
     # Initialize bot_data structure
-    if 'user_states' not in application.bot_data:
+    if 'user_states' not in application.bot_
         application.bot_data['user_states'] = {}
         logger.info("✓ User state storage initialized")
     
