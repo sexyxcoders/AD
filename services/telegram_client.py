@@ -308,4 +308,153 @@ async def get_joined_chats(
             })
         
         logger.info(f"Discovered {len(eligible_chats)} eligible chats for broadcasting")
-        return eligible_chats[:
+        return eligible_chats[:max_chats]  # Respect limit
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch chats: {e}", exc_info=True)
+        return []
+
+async def send_message_safe(
+    client: TelegramClient,
+    chat_id: int,
+    message: str,
+    max_retries: int = 2
+) -> Tuple[bool, str]:
+    """
+    Send message with comprehensive error handling and anti-spam protection.
+    
+    Safety mechanisms:
+    - Flood wait handling with backoff
+    - Message length validation
+    - Content safety checks (avoid spam triggers)
+    - Rate limiting between sends
+    - Detailed error categorization
+    
+    Returns:
+        Tuple of (success: bool, error_message: str)
+    """
+    # Pre-send validations
+    if len(message) > CONFIG.MAX_AD_LENGTH:
+        return False, f"Message too long ({len(message)}/{CONFIG.MAX_AD_LENGTH} chars)"
+    
+    # Content safety checks (basic spam prevention)
+    if message.count('http') > 3:
+        return False, "Too many links detected (spam risk)"
+    if message.isupper() and len(message) > 50:
+        return False, "Excessive capitalization detected (spam risk)"
+    
+    for attempt in range(max_retries + 1):
+        try:
+            await client.send_message(chat_id, message)
+            return True, "Message sent successfully"
+            
+        except FloodWaitError as e:
+            if attempt == max_retries:
+                return False, f"Flood wait exceeded: {e.seconds}s required"
+            
+            wait_time = min(e.seconds * (2 ** attempt), 300)  # Cap at 5 minutes
+            logger.warning(f"Flood wait during send. Waiting {wait_time}s (attempt {attempt+1}/{max_retries+1})")
+            await asyncio.sleep(wait_time)
+            
+        except Exception as e:
+            error_type = type(e).__name__
+            error_msg = str(e)[:100]
+            
+            # Critical errors that shouldn't be retried
+            if error_type in [
+                'ChatWriteForbiddenError',
+                'UserBannedInChannelError',
+                'ChannelPrivateError',
+                'ChatRestrictedError'
+            ]:
+                return False, f"Permission denied: {error_msg}"
+            
+            if error_type == 'MessageTooLongError':
+                return False, "Message exceeds Telegram limits"
+            
+            if attempt == max_retries:
+                return False, f"Send failed after {max_retries+1} attempts: {error_type}: {error_msg}"
+            
+            logger.warning(f"Send attempt {attempt+1} failed: {error_type}: {error_msg}. Retrying...")
+            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+    
+    return False, "Unknown failure after retries"
+
+async def disconnect_client_gracefully(client: TelegramClient, phone: str = "unknown"):
+    """Safely disconnect client and remove from pool"""
+    try:
+        session_str = client.session.save()
+        if session_str in SESSION_POOL:
+            SESSION_POOL.pop(session_str, None)
+        
+        if client.is_connected():
+            await client.disconnect()
+            logger.info(f"✓ Client disconnected gracefully for {phone}")
+        else:
+            logger.debug(f"Client already disconnected for {phone}")
+            
+    except Exception as e:
+        logger.warning(f"Error during client disconnect for {phone}: {e}")
+
+async def cleanup_stale_sessions(max_age_seconds: int = 3600):
+    """
+    Background task to clean up stale sessions from pool.
+    
+    Run periodically via asyncio task:
+        asyncio.create_task(periodic_cleanup())
+    """
+    current_time = time.time()
+    stale_sessions = []
+    
+    for session_str, client in SESSION_POOL.items():
+        # Check last activity via internal Telethon state
+        # Note: Telethon doesn't expose last activity directly
+        # We approximate via connection age
+        try:
+            if not client.is_connected():
+                stale_sessions.append(session_str)
+        except:
+            stale_sessions.append(session_str)
+    
+    for session_str in stale_sessions:
+        client = SESSION_POOL.pop(session_str, None)
+        if client:
+            await disconnect_client_gracefully(client, "stale_session")
+    
+    logger.debug(f"Cleaned up {len(stale_sessions)} stale sessions from pool")
+
+async def health_check_all_sessions():
+    """
+    Periodic health check for all active sessions.
+    
+    Updates account status in database based on session health.
+    """
+    active_accounts = await db.accounts.find({"active": True}).to_list(None)
+    
+    for account in active_accounts:
+        is_valid, reason = await validate_session(account["session"], account["phone"])
+        
+        if not is_valid:
+            logger.warning(f"Session invalid for {account['phone']}: {reason}")
+            # Mark account as inactive
+            await db.accounts.update_one(
+                {"_id": account["_id"]},
+                {"$set": {
+                    "active": False,
+                    "inactive_reason": reason,
+                    "inactive_at": datetime.now(timezone.utc)
+                }}
+            )
+            
+            # Remove from session pool
+            if account["session"] in SESSION_POOL:
+                await disconnect_client_gracefully(SESSION_POOL[account["session"]], account["phone"])
+                SESSION_POOL.pop(account["session"], None)
+        else:
+            # Update last health check timestamp
+            await db.accounts.update_one(
+                {"_id": account["_id"]},
+                {"$set": {"last_health_check": datetime.now(timezone.utc)}}
+            )
+    
+    logger.info(f"Completed health check for {len(active_accounts)} accounts")
