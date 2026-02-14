@@ -424,7 +424,6 @@ async def handle_account_ops(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.answer("Account not found!", show_alert=True)
             return
         text = f"⚠️ DELETE ACCOUNT\n\nRemove `{acc['phone']}`?"
-
 elif action == "confirm_del":
         acc_id = parts[2]
         result = await db.accounts.delete_one({"_id": acc_id, "user_id": user_id})
