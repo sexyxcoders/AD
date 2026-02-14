@@ -500,7 +500,7 @@ async def handle_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]))
     elif parts[1] == "detail":
         active = await db.accounts.count_documents({"user_id": user_id, "active": True})
-        total = await db.accounts.count_documents({"user_id": user_id)})
+        total = await db.accounts.count_documents({"user_id": user_id})
         inactive = total - active
         user_doc = await db.users.find_one({"user_id": str(user_id)})
         delay = user_doc.get("delay", 300) if user_doc else 300
