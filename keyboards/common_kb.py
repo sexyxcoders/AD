@@ -1,4 +1,3 @@
-"""Reusable keyboard components and utility functions"""
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 def get_back_button(destination: str = "dashboard") -> InlineKeyboardButton:
