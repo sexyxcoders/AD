@@ -1,4 +1,3 @@
-"""Start command and navigation handlers"""
 import logging
 from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardMarkup
