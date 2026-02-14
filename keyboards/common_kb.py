@@ -60,7 +60,7 @@ def get_confirmation_keyboard(
 
 def get_single_button_keyboard(
     text: str,
-    callback_ str,
+    callback_data: str,
     emoji: str = "✅"
 ) -> InlineKeyboardMarkup:
     """Generate keyboard with single prominent action button"""
